@@ -1,6 +1,6 @@
 /*
- * Single-pass MPEG-4 / MP3 / MKV. Phase 4 extends VT_EncodeSupported
- * and the codec setup. This file does not include MUI.
+ * Transcode or remux one file. Any profile VT_ProfileValidate accepts
+ * is encoded here. This file does not include MUI.
  */
 #ifndef VT_ENCODER_H
 #define VT_ENCODER_H
