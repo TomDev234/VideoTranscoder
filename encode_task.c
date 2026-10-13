@@ -336,8 +336,12 @@ BOOL VT_Encode_Init(void)
     struct TagItem tags[] = {
         { NP_Entry, (IPTR)encode_entry },
         { NP_Name, (IPTR)"VideoTranscoder encode" },
+        /* Default is CODETYPE_68K. The emulator then runs this PPC
+           function and the first instruction traps as LineF. */
+        { NP_CodeType, CODETYPE_PPC },
         { NP_Priority, (IPTR)(LONG)-1 },
-        { NP_StackSize, 1024UL * 1024UL },
+        { NP_PPCStackSize, 1024UL * 1024UL },
+        { NP_StackSize, 65536 },
         { NP_WindowPtr, (IPTR)(LONG)-1 },
         { NP_Cli, FALSE },
         { NP_Input, 0 },
