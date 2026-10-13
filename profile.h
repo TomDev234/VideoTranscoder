@@ -55,6 +55,7 @@ void VT_ProfileSetDefaults(VTProfile *profile);
 void VT_ProfileNormalize(VTProfile *profile);
 BOOL VT_ProfileNameOK(const char *name);
 BOOL VT_ProfileVideoBitrateOK(VTVideoCodec codec, LONG bitrate);
+LONG VT_ProfileAudioBitrateMax(VTAudioCodec codec);
 BOOL VT_ProfileAudioBitrateOK(VTAudioCodec codec, LONG bitrate);
 BOOL VT_ProfileValidate(const VTProfile *profile);
 BOOL VT_ProfileSlowOnG4(const VTProfile *profile);

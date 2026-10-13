@@ -1,180 +1,102 @@
-#include <exec/types.h>
-#include <libraries/mui.h>
-
+/*
+ * VideoTranscoder application object.
+ * Phase 2 opens the MUI shell. The encoder is not linked yet.
+ */
+#include <dos/dos.h>
+#include <proto/dos.h>
 #include <proto/exec.h>
-#include <proto/intuition.h>
-#include <proto/gadtools.h>
-#include <proto/muimaster.h>
-
 #include <clib/alib_protos.h>
 
 #include "macros.h"
-
-#define ID_ABOUT 1
-
-LONG __stack = 8192;
-
-struct NewMenu Menu[] =
-{
-	{ NM_TITLE, "Project"  , 0 ,0,0,(APTR)0            },
-	{ NM_ITEM , "About..." ,"?",0,0,(APTR)ID_ABOUT     },
-	{ NM_ITEM , NM_BARLABEL, 0 ,0,0,(APTR)0            },
-	{ NM_ITEM , "Quit"     ,"Q",0,0,(APTR)MUIV_Application_ReturnID_Quit },
-	{ NM_END  , NULL       , 0 ,0,0,(APTR)0            },
-};
+#include "vt_ui.h"
+#include "profile.h"
+#include "job.h"
+#include "prefs.h"
 
 int main(void)
 {
-    Object *app;
-    static Object *window;
-    static Object *okButton;
-    static Object *cancelButton;
+    VTProfileStore profiles;
+    VTJobList jobs;
+    VTPrefs prefs;
+    Object *app = NULL;
+    Object *main_win = NULL;
+    Object *profile_win = NULL;
+    ULONG signals = 0;
+    BOOL ui = FALSE;
+    int rc = RETURN_FAIL;
 
-    /*
-     * Create the MUI application and its window.
-     */
+    VT_ProfileStoreInit(&profiles);
+    VT_JobListInit(&jobs);
+    VT_PrefsSetDefaults(&prefs);
+    VT_PrefsLoad(&prefs);
+
+    if (!VT_BatchList_Init() || !VT_ProfileWindow_Init() || !VT_MainWindow_Init()) {
+        PutStr("VideoTranscoder: could not create the interface.\n");
+        goto cleanup;
+    }
+    ui = TRUE;
+    if (!VT_ProfileStoreLoad(&profiles)) {
+        PutStr("VideoTranscoder: not enough memory for profiles.\n");
+        goto cleanup;
+    }
+
+    profile_win = NewObject(VT_ProfileWindowClass->mcc_Class, NULL,
+                            MUIA_VT_Profiles, (ULONG)&profiles,
+                            TAG_DONE);
+    main_win = NewObject(VT_MainWindowClass->mcc_Class, NULL,
+                         MUIA_VT_Jobs, (ULONG)&jobs,
+                         MUIA_VT_Profiles, (ULONG)&profiles,
+                         MUIA_VT_Prefs, (ULONG)&prefs,
+                         MUIA_VT_ProfileWindow, (ULONG)profile_win,
+                         TAG_DONE);
+    if (!profile_win || !main_win) {
+        PutStr("VideoTranscoder: could not build the windows.\n");
+        goto cleanup;
+    }
+    set(profile_win, MUIA_VT_MainWindow, (ULONG)main_win);
+
     app = ApplicationObject,
-
-    MUIA_Application_Title,       (IPTR)"VideoTranscoder",
-    MUIA_Application_Version,     (IPTR)"$VER: VideoTranscoder 1.0",
-    MUIA_Application_Author,      (IPTR)"Master Tom",
-    MUIA_Application_Description, (IPTR)"An easy to use video compressor",
-    MUIA_Application_Base,        (IPTR)"VIDEOTRANSCODER",
-		MUIA_Application_Menustrip     , MUI_MakeObject(MUIO_MenustripNM,Menu,0),
-
-    SubWindow, window = WindowObject,
-
-               MUIA_Window_Title, (IPTR)"Video Transcoder",
-               MUIA_Window_ID,    MAKE_ID('M', 'A', 'I', 'N'),
-
-               WindowContents, VGroup,
-
-               /*
-                * Static text.
-                */
-               Child, TextObject,
-               MUIA_Text_Contents,
-               (IPTR)"Hello from Video Transcoder!\n\n"
-          "This is a simple TextObject containing\n"
-          "some sample text.",
-               MUIA_Text_PreParse, (IPTR)"\33c",
-               End,
-
-               /*
-                * Some vertical space between the text and buttons.
-                */
-               Child, VSpace(8),
-
-               /*
-                * Buttons.
-                */
-               Child, HGroup,
-
-               MUIA_Group_SameSize, TRUE,
-
-               Child, okButton = SimpleButton("_OK"),
-
-                      Child, cancelButton = SimpleButton("_Cancel"),
-
-                             End,
-
-                             End,
-
-                             End,
-
-                             End;
-
-
-    if (app == NULL)
-    {
-        return 20;
+        MUIA_Application_Title, "VideoTranscoder",
+        MUIA_Application_Version, "$VER: VideoTranscoder 1.0 (13.10.2026)",
+        MUIA_Application_Description, "Batch video transcoder",
+        MUIA_Application_Base, "VIDEOTRANSCODER",
+        MUIA_Application_SingleTask, TRUE,
+        MUIA_Application_Window, main_win,
+        SubWindow, profile_win,
+    End;
+    if (!app) {
+        PutStr("VideoTranscoder: could not open MUI.\n");
+        goto cleanup;
     }
 
-
-    /*
-     * Pressing the window close gadget terminates the application.
-     */
-    DoMethod(
-        window,
-        MUIM_Notify,
-        MUIA_Window_CloseRequest,
-        TRUE,
-        (IPTR)app,
-        2,
-        MUIM_Application_ReturnID,
-        MUIV_Application_ReturnID_Quit
-    );
-
-
-    /*
-     * OK button -> quit.
-     */
-    DoMethod(
-        okButton,
-        MUIM_Notify,
-        MUIA_Pressed,
-        FALSE,
-        (IPTR)app,
-        2,
-        MUIM_Application_ReturnID,
-        MUIV_Application_ReturnID_Quit
-    );
-
-
-    /*
-     * Cancel button -> quit.
-     */
-    DoMethod(
-        cancelButton,
-        MUIM_Notify,
-        MUIA_Pressed,
-        FALSE,
-        (IPTR)app,
-        2,
-        MUIM_Application_ReturnID,
-        MUIV_Application_ReturnID_Quit
-    );
-
-
-    /*
-     * Open the window.
-     */
-    set(window, MUIA_Window_Open, TRUE);
-
-    /*
-     * Main MUI event loop.
-     */
-    ULONG signal;
-    BOOL quit = false;
-
-    do
-    {
-        switch (DoMethod(app,MUIM_Application_Input,&signal))
-        {
-        case MUIV_Application_ReturnID_Quit:
-            quit = true;
-            break;
-
-            case ID_ABOUT:
-            MUI_Request(app, window, 0, NULL, "OK", "VideoTranscoder\n© 2026 Master Tom");
-            break;
-        }
-        if (!quit && signal != 0) Wait(signal);
+    set(main_win, MUIA_Window_Open, TRUE);
+    if (!xget(main_win, MUIA_Window_Open)) {
+        PutStr("VideoTranscoder: could not open the window.\n");
+        goto cleanup;
     }
-    while(!quit);
 
+    rc = RETURN_OK;
+    while (DoMethod(app, MUIM_Application_NewInput, &signals) != MUIV_Application_ReturnID_Quit) {
+        if (signals)
+            Wait(signals);
+    }
+    DoMethod(main_win, MUIM_VT_SavePrefs);
 
-    /*
-     * Close the window.
-     */
-    //set(window, MUIA_Window_Open, FALSE);
-
-
-    /*
-     * Dispose the complete MUI object hierarchy.
-     */
-    MUI_DisposeObject(app);
-
-
-    return 0;
+cleanup:
+    if (app)
+        MUI_DisposeObject(app);
+    else {
+        if (main_win)
+            MUI_DisposeObject(main_win);
+        if (profile_win)
+            MUI_DisposeObject(profile_win);
+    }
+    VT_JobListFree(&jobs);
+    VT_ProfileStoreFree(&profiles);
+    if (ui) {
+        VT_MainWindow_Exit();
+        VT_ProfileWindow_Exit();
+        VT_BatchList_Exit();
+    }
+    return rc;
 }

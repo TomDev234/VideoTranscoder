@@ -70,25 +70,29 @@ BOOL VT_ProfileVideoBitrateOK(VTVideoCodec codec, LONG bitrate)
     return (BOOL)(bitrate >= VT_VIDEO_BITRATE_MIN && bitrate <= VT_VIDEO_BITRATE_MAX);
 }
 
+LONG VT_ProfileAudioBitrateMax(VTAudioCodec codec)
+{
+    switch (codec) {
+    case VT_ACODEC_MP3:
+        return VT_MP3_BITRATE_MAX;
+    case VT_ACODEC_AAC:
+        return VT_AAC_BITRATE_MAX;
+    case VT_ACODEC_AC3:
+        return VT_AC3_BITRATE_MAX;
+    default:
+        return 0;
+    }
+}
+
 BOOL VT_ProfileAudioBitrateOK(VTAudioCodec codec, LONG bitrate)
 {
     LONG max_rate;
 
-    switch (codec) {
-    case VT_ACODEC_MP3:
-        max_rate = VT_MP3_BITRATE_MAX;
-        break;
-    case VT_ACODEC_AAC:
-        max_rate = VT_AAC_BITRATE_MAX;
-        break;
-    case VT_ACODEC_AC3:
-        max_rate = VT_AC3_BITRATE_MAX;
-        break;
-    case VT_ACODEC_COPY:
+    if (codec == VT_ACODEC_COPY)
         return TRUE;
-    default:
+    max_rate = VT_ProfileAudioBitrateMax(codec);
+    if (max_rate <= 0)
         return FALSE;
-    }
     return (BOOL)(bitrate >= VT_AUDIO_BITRATE_MIN && bitrate <= max_rate);
 }
 
