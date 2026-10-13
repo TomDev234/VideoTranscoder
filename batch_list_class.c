@@ -20,6 +20,7 @@ struct BatchRow {
     VTJob *job;
     char progress[16];
     char output[128];
+    char detail[128];
 };
 
 struct BatchData {
@@ -55,9 +56,14 @@ static ULONG batch_display(void)
     if (row->job->output_path[0] == '\0' ||
         !VT_BaseName(row->job->output_path, row->output, sizeof row->output))
         row->output[0] = '\0';
+    if (row->job->error[0] && row->job->status == VT_JOB_FAILED)
+        snprintf(row->detail, sizeof row->detail, "%s: %s",
+                 VT_JobStatusLabel(row->job->status), row->job->error);
+    else
+        VT_StrCopyTrunc(row->detail, sizeof row->detail, VT_JobStatusLabel(row->job->status));
     array[0] = row->job->source_name;
     array[1] = row->job->profile.name;
-    array[2] = (char *)VT_JobStatusLabel(row->job->status);
+    array[2] = row->detail;
     array[3] = row->progress;
     array[4] = row->output;
     return 0;
@@ -77,6 +83,7 @@ static ULONG batch_construct(void)
     row->job = job;
     row->progress[0] = '\0';
     row->output[0] = '\0';
+    row->detail[0] = '\0';
     return (ULONG)row;
 }
 

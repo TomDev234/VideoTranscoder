@@ -1,6 +1,7 @@
 /*
  * Home window. Buttons call the job and profile models, then the
- * batch list redraws. Start does not encode; that arrives with the encoder.
+ * batch list redraws. Start queues work; the encode task reports back
+ * through MUIM_VT_EncodeNote on the main task.
  */
 #include <emul/emulregs.h>
 #include <dos/dos.h>
@@ -19,6 +20,7 @@
 #include "job.h"
 #include "prefs.h"
 #include "vt_util.h"
+#include "encode_task.h"
 
 struct MUI_CustomClass *VT_MainWindowClass;
 
@@ -306,9 +308,31 @@ static ULONG main_start(struct MainData *data)
         set_status(data, "Choose a profile.");
         return 0;
     }
+    if (!VT_Encode_IsReady()) {
+        set_status(data, "The encoder did not start.");
+        return 0;
+    }
+    if (VT_Encode_IsRunning()) {
+        set_status(data, "Encoding is already running.");
+        return 0;
+    }
     if (data->prefs)
         VT_StrCopy(data->prefs->output_drawer, sizeof data->prefs->output_drawer, drawer);
-    set_status(data, "The encoder is not in this build yet.");
+    if (!VT_Encode_Submit(data->jobs, drawer)) {
+        set_status(data, "Could not queue the files.");
+        return 0;
+    }
+    set_status(data, "Encoding.");
+    return 0;
+}
+
+static ULONG main_stop(struct MainData *data)
+{
+    if (!VT_Encode_Stop()) {
+        set_status(data, "Nothing is running.");
+        return 0;
+    }
+    set_status(data, "Stopping.");
     return 0;
 }
 
@@ -582,8 +606,15 @@ DISPATCHER(MainWindow)
     case MUIM_VT_Start:
         return main_start(data);
     case MUIM_VT_Stop:
-        set_status(data, "Nothing is running.");
+        return main_stop(data);
+    case MUIM_VT_EncodeNote: {
+        struct MUIP_VT_EncodeNote *note = (struct MUIP_VT_EncodeNote *)msg;
+
+        if (note->status && note->status[0])
+            set_status(data, note->status);
+        refresh_jobs(data);
         return 0;
+    }
     case MUIM_VT_NewProfile:
         return main_profile_use(data, -1);
     case MUIM_VT_EditProfile: {

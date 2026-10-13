@@ -43,6 +43,7 @@
 #define MUIM_VT_ProfileCancel    (VT_TAGBASE + 37)
 #define MUIM_VT_Close            (VT_TAGBASE + 38)
 #define MUIM_VT_BatchGetActive   (VT_TAGBASE + 39)
+#define MUIM_VT_EncodeNote       (VT_TAGBASE + 40)
 
 struct MUIP_VT_ProfilesChanged {
     ULONG MethodID;
@@ -52,6 +53,11 @@ struct MUIP_VT_ProfilesChanged {
 struct MUIP_VT_ProfileUse {
     ULONG MethodID;
     LONG index;
+};
+
+struct MUIP_VT_EncodeNote {
+    ULONG MethodID;
+    const char *status;
 };
 
 struct MUI_CustomClass;

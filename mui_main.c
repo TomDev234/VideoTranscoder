@@ -1,6 +1,7 @@
 /*
  * VideoTranscoder application object.
- * Phase 2 opens the MUI shell. The encoder is not linked yet.
+ * The encode process is started with the program. This loop drains its
+ * messages; MUI is only used on this task.
  */
 #include <dos/dos.h>
 #include <proto/dos.h>
@@ -12,6 +13,7 @@
 #include "profile.h"
 #include "job.h"
 #include "prefs.h"
+#include "encode_task.h"
 
 int main(void)
 {
@@ -22,7 +24,9 @@ int main(void)
     Object *main_win = NULL;
     Object *profile_win = NULL;
     ULONG signals = 0;
+    ULONG encode_sig = 0;
     BOOL ui = FALSE;
+    BOOL encoder = FALSE;
     int rc = RETURN_FAIL;
 
     VT_ProfileStoreInit(&profiles);
@@ -75,11 +79,31 @@ int main(void)
         goto cleanup;
     }
 
+    encoder = VT_Encode_Init();
+    if (!encoder)
+        PutStr("VideoTranscoder: the encoder did not start.\n");
+    encode_sig = VT_Encode_Signal();
+
     rc = RETURN_OK;
-    while (DoMethod(app, MUIM_Application_NewInput, &signals) != MUIV_Application_ReturnID_Quit) {
+    for (;;) {
+        char status[160];
+        struct MUIP_VT_EncodeNote note;
+        ULONG id = DoMethod(app, MUIM_Application_NewInput, &signals);
+
+        status[0] = '\0';
+        if (VT_Encode_Drain(&jobs, status, sizeof status)) {
+            note.MethodID = MUIM_VT_EncodeNote;
+            note.status = status;
+            DoMethodA(main_win, (Msg)&note);
+        }
+        if (id == MUIV_Application_ReturnID_Quit)
+            break;
         if (signals)
-            Wait(signals);
+            Wait(signals | encode_sig);
     }
+    if (encoder)
+        VT_Encode_Shutdown(&jobs);
+    encoder = FALSE;
     DoMethod(main_win, MUIM_VT_SavePrefs);
 
 cleanup:
