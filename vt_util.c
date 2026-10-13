@@ -326,7 +326,7 @@ BOOL VT_DeleteIfExists(const char *path)
         return FALSE;
     if (!VT_FileExists(path))
         return TRUE;
-    return (BOOL)(Delete((STRPTR)path) != 0);
+    return (BOOL)(DeleteFile((STRPTR)path) != 0);
 }
 
 BOOL VT_EnsureDir(const char *path)
@@ -428,33 +428,33 @@ BOOL VT_WriteTextFileAtomic(const char *path, const char *text)
     if (!suffix_path(path, ".bak", bak_path, sizeof bak_path))
         return FALSE;
 
-    Delete((STRPTR)tmp_path);
+    DeleteFile((STRPTR)tmp_path);
     handle = Open((STRPTR)tmp_path, MODE_NEWFILE);
     if (!handle)
         return FALSE;
     wrote = Write(handle, (APTR)text, length);
     Close(handle);
     if (wrote != length) {
-        Delete((STRPTR)tmp_path);
+        DeleteFile((STRPTR)tmp_path);
         return FALSE;
     }
 
     had_original = VT_FileExists(path);
     if (had_original) {
-        Delete((STRPTR)bak_path);
+        DeleteFile((STRPTR)bak_path);
         if (!Rename((STRPTR)path, (STRPTR)bak_path)) {
-            Delete((STRPTR)tmp_path);
+            DeleteFile((STRPTR)tmp_path);
             return FALSE;
         }
     }
     if (!Rename((STRPTR)tmp_path, (STRPTR)path)) {
         if (had_original)
             Rename((STRPTR)bak_path, (STRPTR)path);
-        Delete((STRPTR)tmp_path);
+        DeleteFile((STRPTR)tmp_path);
         return FALSE;
     }
     if (had_original)
-        Delete((STRPTR)bak_path);
+        DeleteFile((STRPTR)bak_path);
     return TRUE;
 }
 
