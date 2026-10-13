@@ -719,7 +719,7 @@ static int open_video_encoder(struct EncodeCtx *cx, int pass)
     if (cx->global_header)
         enc->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
     if (h264) {
-        av_dict_set(&opts, "preset", "veryfast", 0);
+        av_dict_set(&opts, "preset", "fast", 0);
         av_dict_set(&opts, "mbtree", "0", 0);
         av_dict_set(&opts, "threads", "1", 0);
     }
