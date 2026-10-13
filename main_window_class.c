@@ -17,6 +17,7 @@
 #include "macros.h"
 #include "vt_ui.h"
 #include "job.h"
+#include "prefs.h"
 #include "vt_util.h"
 
 struct MUI_CustomClass *VT_MainWindowClass;
@@ -491,7 +492,6 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
         End,
         Child, ListviewObject,
             MUIA_Listview_List, batch,
-            MUIA_Listview_DefHeight, 12,
             MUIA_Weight, 100,
         End,
         Child, HGroup,
