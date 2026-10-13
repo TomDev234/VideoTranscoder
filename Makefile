@@ -7,34 +7,38 @@ CFLAGS = -pipe \
 LDFLAGS = -noixemul
 INCDIR = -I./include
 PREFIX = /usr/local
-SRCS = mui_main.c mui_class1.c
-OBJS = $(SRCS:.c=.o)
+
+# Phase 1 is the model layer. The MUI sources and the application link
+# are added in later phases, when mui_main.c exists.
+MODEL_SRCS = vt_util.c compat.c profile.c prefs.c job.c
+MODEL_OBJS = $(MODEL_SRCS:.c=.o)
 EXE = VideoTranscoder
 
 #-------------------------------------------------------------------------------
 
-.PHONY: all install clean distclean depend
+.PHONY: all models install clean distclean depend
 
-all: $(EXE)
+all: models
 
-$(EXE): $(OBJS)
-	$(CC) $(LDFLAGS) $(OBJS) -o $@
+models: $(MODEL_OBJS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) $(INCDIR) -c $< -o $@
+
+$(MODEL_OBJS): vt_types.h vt_util.h compat.h profile.h prefs.h job.h
 
 install: $(EXE)
 	strip $(EXE)
 	cp $(EXE) $(PREFIX)/bin/
 
 clean:
-	$(RM) $(OBJS)
+	$(RM) $(MODEL_OBJS)
 
 distclean: clean
 	$(RM) $(EXE) .depend
 
 depend:
-	$(CC) -MM $(CFLAGS) $(INCDIR) $(SRCS) > .depend
+	$(CC) -MM $(CFLAGS) $(INCDIR) $(MODEL_SRCS) > .depend
 
 # --- include dependency files if they exist ---
 ifneq ($(wildcard .depend),)
