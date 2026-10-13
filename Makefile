@@ -4,7 +4,10 @@ CC = ppc-morphos-gcc-15
 CFLAGS = -pipe \
          -noixemul -Os -mcpu=G4 -mtune=G4 -mmultiple \
          -ffast-math -fomit-frame-pointer
-LDFLAGS = -noixemul
+LDFLAGS = -noixemul -L./lib \
+    -lavdevice -lavfilter -lavformat -lavcodec -lswscale -lswresample \
+    -lavutil -lx264 -lmp3lame -lbz2 -lssl_shared -lcrypto_shared \
+    -lz_shared -lpthread -latomic -lmotovec
 INCDIR = -I./include
 PREFIX = /usr/local
 
