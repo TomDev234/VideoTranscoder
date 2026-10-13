@@ -23,9 +23,10 @@ int main(void)
     Object *app = NULL;
     Object *main_win = NULL;
     Object *profile_win = NULL;
+    Object *job_log = NULL;
+    Object *about = NULL;
     ULONG signals = 0;
     ULONG encode_sig = 0;
-    BOOL ui = FALSE;
     BOOL encoder = FALSE;
     int rc = RETURN_FAIL;
 
@@ -34,16 +35,18 @@ int main(void)
     VT_PrefsSetDefaults(&prefs);
     VT_PrefsLoad(&prefs);
 
-    if (!VT_BatchList_Init() || !VT_ProfileWindow_Init() || !VT_MainWindow_Init()) {
+    if (!VT_BatchList_Init() || !VT_ProfileWindow_Init() || !VT_JobLogWindow_Init() ||
+        !VT_AboutWindow_Init() || !VT_MainWindow_Init()) {
         PutStr("VideoTranscoder: could not create the interface.\n");
         goto cleanup;
     }
-    ui = TRUE;
     if (!VT_ProfileStoreLoad(&profiles)) {
         PutStr("VideoTranscoder: not enough memory for profiles.\n");
         goto cleanup;
     }
 
+    job_log = NewObject(VT_JobLogWindowClass->mcc_Class, NULL, TAG_DONE);
+    about = NewObject(VT_AboutWindowClass->mcc_Class, NULL, TAG_DONE);
     profile_win = NewObject(VT_ProfileWindowClass->mcc_Class, NULL,
                             MUIA_VT_Profiles, (ULONG)&profiles,
                             TAG_DONE);
@@ -52,8 +55,10 @@ int main(void)
                          MUIA_VT_Profiles, (ULONG)&profiles,
                          MUIA_VT_Prefs, (ULONG)&prefs,
                          MUIA_VT_ProfileWindow, (ULONG)profile_win,
+                         MUIA_VT_JobLogWindow, (ULONG)job_log,
+                         MUIA_VT_AboutWindow, (ULONG)about,
                          TAG_DONE);
-    if (!profile_win || !main_win) {
+    if (!profile_win || !main_win || !job_log || !about) {
         PutStr("VideoTranscoder: could not build the windows.\n");
         goto cleanup;
     }
@@ -61,12 +66,14 @@ int main(void)
 
     app = ApplicationObject,
         MUIA_Application_Title, "VideoTranscoder",
-        MUIA_Application_Version, "$VER: VideoTranscoder 1.0 (13.10.2026)",
+        MUIA_Application_Version, VT_APP_VERSION,
         MUIA_Application_Description, "Batch video transcoder",
         MUIA_Application_Base, "VIDEOTRANSCODER",
         MUIA_Application_SingleTask, TRUE,
         MUIA_Application_Window, main_win,
         SubWindow, profile_win,
+        SubWindow, job_log,
+        SubWindow, about,
     End;
     if (!app) {
         PutStr("VideoTranscoder: could not open MUI.\n");
@@ -114,13 +121,17 @@ cleanup:
             MUI_DisposeObject(main_win);
         if (profile_win)
             MUI_DisposeObject(profile_win);
+        if (job_log)
+            MUI_DisposeObject(job_log);
+        if (about)
+            MUI_DisposeObject(about);
     }
     VT_JobListFree(&jobs);
     VT_ProfileStoreFree(&profiles);
-    if (ui) {
-        VT_MainWindow_Exit();
-        VT_ProfileWindow_Exit();
-        VT_BatchList_Exit();
-    }
+    VT_MainWindow_Exit();
+    VT_AboutWindow_Exit();
+    VT_JobLogWindow_Exit();
+    VT_ProfileWindow_Exit();
+    VT_BatchList_Exit();
     return rc;
 }

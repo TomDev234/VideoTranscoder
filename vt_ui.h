@@ -22,6 +22,11 @@
 #define MUIA_VT_Prefs         (VT_TAGBASE + 3)
 #define MUIA_VT_ProfileWindow (VT_TAGBASE + 4)
 #define MUIA_VT_MainWindow    (VT_TAGBASE + 5)
+#define MUIA_VT_JobLogWindow  (VT_TAGBASE + 6)
+#define MUIA_VT_AboutWindow   (VT_TAGBASE + 7)
+
+#define VT_VERSION_TEXT "1.0 (13.10.2026)"
+#define VT_APP_VERSION  "$VER: VideoTranscoder " VT_VERSION_TEXT
 
 #define MUIM_VT_BatchSync        (VT_TAGBASE + 20)
 #define MUIM_VT_AddFiles         (VT_TAGBASE + 21)
@@ -44,6 +49,10 @@
 #define MUIM_VT_Close            (VT_TAGBASE + 38)
 #define MUIM_VT_BatchGetActive   (VT_TAGBASE + 39)
 #define MUIM_VT_EncodeNote       (VT_TAGBASE + 40)
+#define MUIM_VT_Drop             (VT_TAGBASE + 41)
+#define MUIM_VT_ShowLog          (VT_TAGBASE + 42)
+#define MUIM_VT_ShowAbout        (VT_TAGBASE + 43)
+#define MUIM_VT_JobLogUse        (VT_TAGBASE + 44)
 
 struct MUIP_VT_ProfilesChanged {
     ULONG MethodID;
@@ -60,11 +69,21 @@ struct MUIP_VT_EncodeNote {
     const char *status;
 };
 
+struct VTJob;
+
+struct MUIP_VT_JobLogUse {
+    ULONG MethodID;
+    const struct VTJob *job;
+    BOOL open_window;
+};
+
 struct MUI_CustomClass;
 
 extern struct MUI_CustomClass *VT_BatchListClass;
 extern struct MUI_CustomClass *VT_MainWindowClass;
 extern struct MUI_CustomClass *VT_ProfileWindowClass;
+extern struct MUI_CustomClass *VT_JobLogWindowClass;
+extern struct MUI_CustomClass *VT_AboutWindowClass;
 
 BOOL VT_BatchList_Init(void);
 void VT_BatchList_Exit(void);
@@ -72,6 +91,10 @@ BOOL VT_MainWindow_Init(void);
 void VT_MainWindow_Exit(void);
 BOOL VT_ProfileWindow_Init(void);
 void VT_ProfileWindow_Exit(void);
+BOOL VT_JobLogWindow_Init(void);
+void VT_JobLogWindow_Exit(void);
+BOOL VT_AboutWindow_Init(void);
+void VT_AboutWindow_Exit(void);
 
 static inline Object *VT_SuperNew(struct IClass *cl, Object *obj, const struct TagItem *user,
                                   const struct TagItem *mine, ULONG mine_count)

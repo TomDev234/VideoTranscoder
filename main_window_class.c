@@ -29,6 +29,8 @@ struct MainData {
     VTProfileStore *profiles;
     VTPrefs *prefs;
     Object *profile_window;
+    Object *job_log;
+    Object *about;
     Object *batch;
     Object *drawer_string;
     Object *profile_cycle;
@@ -37,6 +39,7 @@ struct MainData {
     const char *cycle_entries[VT_PROFILE_MAX + 1];
     char status_buf[160];
     char add_drawer[VT_PATH_LEN];
+    ULONG shown_job;
     BOOL quiet;
 };
 
@@ -135,24 +138,28 @@ static void store_prefs(struct MainData *data, Object *obj)
     VT_PrefsSave(data->prefs);
 }
 
-static BOOL path_is_file(const char *path)
+static int path_kind(const char *path)
 {
     BPTR lock;
     struct FileInfoBlock *fib;
-    BOOL file = FALSE;
+    int kind = 0;
 
     if (!path || !path[0])
-        return FALSE;
+        return 0;
     lock = Lock((STRPTR)path, ACCESS_READ);
     if (!lock)
-        return FALSE;
+        return 0;
     fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
-    if (fib && Examine(lock, fib))
-        file = (BOOL)(fib->fib_DirEntryType < 0);
+    if (fib && Examine(lock, fib)) {
+        if (fib->fib_DirEntryType < 0)
+            kind = 1;
+        else if (fib->fib_DirEntryType > 0)
+            kind = 2;
+    }
     if (fib)
         FreeDosObject(DOS_FIB, fib);
     UnLock(lock);
-    return file;
+    return kind;
 }
 
 static BOOL join_arg(const struct WBArg *arg, char *out, ULONG out_len)
@@ -172,13 +179,53 @@ static void queue_path(struct MainData *data, const char *path, ULONG *added)
 {
     const VTProfile *profile;
 
-    if (!path_is_file(path))
+    if (!path || VT_EndsWithI(path, ".info"))
+        return;
+    if (path_kind(path) != 1)
         return;
     profile = active_profile(data);
     if (!profile)
         return;
     if (VT_JobListAdd(data->jobs, path, profile))
         (*added)++;
+}
+
+static void queue_drawer(struct MainData *data, const char *drawer, ULONG *added)
+{
+    BPTR lock;
+    struct FileInfoBlock *fib;
+    char path[VT_PATH_LEN];
+
+    if (!drawer || !drawer[0])
+        return;
+    lock = Lock((STRPTR)drawer, ACCESS_READ);
+    fib = (struct FileInfoBlock *)AllocDosObject(DOS_FIB, NULL);
+    if (lock && fib && Examine(lock, fib)) {
+        while (ExNext(lock, fib)) {
+            if (fib->fib_DirEntryType > 0)
+                continue;
+            if (!VT_JoinDrawerFile(drawer, fib->fib_FileName, path, sizeof path))
+                continue;
+            queue_path(data, path, added);
+        }
+    }
+    if (fib)
+        FreeDosObject(DOS_FIB, fib);
+    if (lock)
+        UnLock(lock);
+}
+
+static void report_added(struct MainData *data, ULONG added)
+{
+    refresh_jobs(data);
+    if (added == 0)
+        set_status(data, "No files were added.");
+    else if (added == 1)
+        set_status(data, "Added 1 file.");
+    else {
+        snprintf(data->status_buf, sizeof data->status_buf, "Added %lu files.", (unsigned long)added);
+        set_status(data, data->status_buf);
+    }
 }
 
 static ULONG main_add(struct MainData *data, Object *obj)
@@ -232,15 +279,104 @@ static ULONG main_add(struct MainData *data, Object *obj)
         queue_path(data, full, &added);
     }
     MUI_FreeAslRequest(request);
-    refresh_jobs(data);
-    if (added == 0)
-        set_status(data, "No files were added.");
-    else if (added == 1)
-        set_status(data, "Added 1 file.");
-    else {
-        snprintf(data->status_buf, sizeof data->status_buf, "Added %lu files.", (unsigned long)added);
-        set_status(data, data->status_buf);
+    report_added(data, added);
+    return 0;
+}
+
+struct MUIP_VT_Drop {
+    ULONG MethodID;
+    struct AppMessage *message;
+};
+
+static ULONG main_drop(struct MainData *data, struct AppMessage *message)
+{
+    ULONG added = 0;
+    LONG index;
+    char full[VT_PATH_LEN];
+    char drawer[VT_PATH_LEN];
+
+    if (!data->jobs) {
+        set_status(data, "The queue is not available.");
+        return 0;
     }
+    if (!active_profile(data)) {
+        set_status(data, "Choose a profile.");
+        return 0;
+    }
+    if (!message || message->am_NumArgs <= 0 || !message->am_ArgList) {
+        set_status(data, "No files were added.");
+        return 0;
+    }
+    for (index = 0; index < message->am_NumArgs; index++) {
+        const struct WBArg *arg = &message->am_ArgList[index];
+
+        if (arg->wa_Name && arg->wa_Name[0]) {
+            if (!join_arg(arg, full, sizeof full))
+                continue;
+            if (path_kind(full) == 2)
+                queue_drawer(data, full, &added);
+            else
+                queue_path(data, full, &added);
+        } else if (arg->wa_Lock && NameFromLock(arg->wa_Lock, drawer, (LONG)sizeof drawer)) {
+            queue_drawer(data, drawer, &added);
+        }
+    }
+    report_added(data, added);
+    return 0;
+}
+
+static void show_log(struct MainData *data, const VTJob *job, BOOL open_window)
+{
+    struct MUIP_VT_JobLogUse msg;
+
+    if (!data->job_log || !job)
+        return;
+    data->shown_job = job->id;
+    msg.MethodID = MUIM_VT_JobLogUse;
+    msg.job = (const struct VTJob *)job;
+    msg.open_window = open_window;
+    DoMethodA(data->job_log, (Msg)&msg);
+}
+
+static void refresh_log(struct MainData *data)
+{
+    VTJob *job;
+
+    if (!data->job_log || !data->shown_job || !data->jobs)
+        return;
+    if (!xget(data->job_log, MUIA_Window_Open))
+        return;
+    job = VT_JobListFind(data->jobs, data->shown_job);
+    if (job)
+        show_log(data, job, FALSE);
+}
+
+static LONG selected_job_index(struct MainData *data);
+
+static ULONG main_show_log(struct MainData *data)
+{
+    LONG index;
+
+    if (!data->job_log) {
+        set_status(data, "The job log is not available.");
+        return 0;
+    }
+    index = selected_job_index(data);
+    if (index < 0 || !data->jobs) {
+        set_status(data, "Select a job first.");
+        return 0;
+    }
+    show_log(data, data->jobs->items[index], TRUE);
+    return 0;
+}
+
+static ULONG main_show_about(struct MainData *data)
+{
+    if (!data->about) {
+        set_status(data, "The about window is not available.");
+        return 0;
+    }
+    set(data->about, MUIA_Window_Open, TRUE);
     return 0;
 }
 
@@ -443,6 +579,8 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     Object *edit_button;
     Object *duplicate_button;
     Object *delete_button;
+    Object *log_button;
+    Object *about_button;
     struct TagItem extra[8];
     ULONG extra_count = 0;
 
@@ -490,6 +628,8 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     edit_button = SimpleButton("_Edit");
     duplicate_button = SimpleButton("D_uplicate");
     delete_button = SimpleButton("De_lete");
+    log_button = SimpleButton("_Log");
+    about_button = SimpleButton("A_bout");
 
     root = VGroup,
         Child, HGroup,
@@ -522,6 +662,8 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
             Child, add_button,
             Child, remove_button,
             Child, clear_button,
+            Child, log_button,
+            Child, about_button,
             Child, RectangleObject, MUIA_Weight, 100, End,
             Child, start_button,
             Child, stop_button,
@@ -542,6 +684,8 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     extra[extra_count++].ti_Data = 720;
     extra[extra_count].ti_Tag = MUIA_Window_Height;
     extra[extra_count++].ti_Data = 480;
+    extra[extra_count].ti_Tag = MUIA_Window_AppWindow;
+    extra[extra_count++].ti_Data = TRUE;
 
     obj = VT_SuperNew(cl, obj, ops->ops_AttrList, extra, extra_count);
     if (!obj) {
@@ -554,6 +698,8 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     data->profiles = (VTProfileStore *)GetTagData(MUIA_VT_Profiles, 0, ops->ops_AttrList);
     data->prefs = prefs;
     data->profile_window = (Object *)GetTagData(MUIA_VT_ProfileWindow, 0, ops->ops_AttrList);
+    data->job_log = (Object *)GetTagData(MUIA_VT_JobLogWindow, 0, ops->ops_AttrList);
+    data->about = (Object *)GetTagData(MUIA_VT_AboutWindow, 0, ops->ops_AttrList);
     data->batch = batch;
     data->drawer_string = drawer_string;
     data->profile_cycle = profile_cycle;
@@ -561,6 +707,7 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     data->status = status;
     data->quiet = FALSE;
     data->add_drawer[0] = '\0';
+    data->shown_job = 0;
     VT_StrCopyTrunc(data->status_buf, sizeof data->status_buf,
                     "Add files, choose a profile and an output drawer.");
     if (prefs && prefs->window_valid && prefs->window_width > 80 && prefs->window_height > 60) {
@@ -580,11 +727,15 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     DoMethod(edit_button, MUIM_Notify, MUIA_Pressed, FALSE, obj, 1, MUIM_VT_EditProfile);
     DoMethod(duplicate_button, MUIM_Notify, MUIA_Pressed, FALSE, obj, 1, MUIM_VT_DuplicateProfile);
     DoMethod(delete_button, MUIM_Notify, MUIA_Pressed, FALSE, obj, 1, MUIM_VT_DeleteProfile);
+    DoMethod(log_button, MUIM_Notify, MUIA_Pressed, FALSE, obj, 1, MUIM_VT_ShowLog);
+    DoMethod(about_button, MUIM_Notify, MUIA_Pressed, FALSE, obj, 1, MUIM_VT_ShowAbout);
     DoMethod(profile_cycle, MUIM_Notify, MUIA_Cycle_Active, MUIV_EveryTime,
              obj, 1, MUIM_VT_ProfileCycle);
     DoMethod(drawer_string, MUIM_Notify, MUIA_String_Contents, MUIV_EveryTime,
              obj, 1, MUIM_VT_DrawerChanged);
     DoMethod(obj, MUIM_Notify, MUIA_Window_CloseRequest, TRUE, obj, 1, MUIM_VT_Close);
+    DoMethod(obj, MUIM_Notify, MUIA_AppMessage, MUIV_EveryTime,
+             obj, 2, MUIM_VT_Drop, MUIV_TriggerValue);
     return obj;
 }
 
@@ -599,6 +750,12 @@ DISPATCHER(MainWindow)
         return (ULONG)main_new(cl, obj, (struct opSet *)msg);
     case MUIM_VT_AddFiles:
         return main_add(data, obj);
+    case MUIM_VT_Drop:
+        return main_drop(data, ((struct MUIP_VT_Drop *)msg)->message);
+    case MUIM_VT_ShowLog:
+        return main_show_log(data);
+    case MUIM_VT_ShowAbout:
+        return main_show_about(data);
     case MUIM_VT_RemoveJob:
         return main_remove(data);
     case MUIM_VT_ClearJobs:
@@ -613,6 +770,7 @@ DISPATCHER(MainWindow)
         if (note->status && note->status[0])
             set_status(data, note->status);
         refresh_jobs(data);
+        refresh_log(data);
         return 0;
     }
     case MUIM_VT_NewProfile:
