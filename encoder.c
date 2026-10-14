@@ -738,6 +738,10 @@ static int open_video_encoder(struct EncodeCtx *cx, int pass)
            with the rest of the 2-pass log. */
         av_dict_set(&opts, "fastfirstpass", "0", 0);
         av_dict_set(&opts, "threads", "1", 0);
+        /* This libx264's AltiVec IDCT writes bad blocks once the fast
+           preset reconstructs them. Those blocks show up as white
+           squares and then spread. The C paths do not. */
+        av_dict_set(&opts, "x264-params", "asm=none", 0);
     }
     if ((pass == 1 || pass == 2) && cx->stats_path[0])
         av_dict_set(&opts, "stats", cx->stats_path, 0);
