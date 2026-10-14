@@ -26,7 +26,6 @@ struct ProfileData {
     Object *video_bitrate;
     Object *audio_bitrate;
     Object *gain;
-    Object *two_pass;
     Object *slow_note;
     Object *hint;
     Object *error;
@@ -176,7 +175,6 @@ static void read_profile(struct ProfileData *data, VTProfile *out)
             gain = VT_GAIN_DB_MAX + 1;
         out->audio_gain_db = gain;
     }
-    out->two_pass = xget(data->two_pass, MUIA_Selected) ? TRUE : FALSE;
     VT_ProfileNormalize(out);
 }
 
@@ -188,15 +186,12 @@ static void apply_flags(struct ProfileData *data, const VTProfile *profile)
 
     set(data->video_bitrate, MUIA_Disabled, video_copy);
     set(data->scale, MUIA_Disabled, video_copy);
-    set(data->two_pass, MUIA_Disabled, video_copy);
     set(data->audio_bitrate, MUIA_Disabled, audio_copy);
     set(data->gain, MUIA_Disabled, audio_copy);
-    if (video_copy)
-        nnset(data->two_pass, MUIA_Selected, FALSE);
 
     if (video_copy && audio_copy) {
         snprintf(data->hint_text, sizeof data->hint_text,
-                 "Streams are copied. Size, bitrate, gain, and 2-pass are not applied.");
+                 "Streams are copied. Size, bitrate, and gain are not applied.");
     } else if (video_copy) {
         snprintf(data->hint_text, sizeof data->hint_text,
                  "Video is copied at its original size. Audio %ld-%ld kbit/s. Gain %ld to %ld dB.",
@@ -271,7 +266,6 @@ static void fill_from_profile(struct ProfileData *data, const VTProfile *profile
     nnset(data->scale, MUIA_Cycle_Active, profile->scale);
     write_long(data->audio_bitrate, profile->audio_bitrate);
     write_long(data->gain, profile->audio_gain_db);
-    nnset(data->two_pass, MUIA_Selected, profile->two_pass ? TRUE : FALSE);
     apply_flags(data, profile);
     show_error(data, "");
     data->updating = FALSE;
@@ -401,7 +395,6 @@ static Object *profile_new(struct IClass *cl, Object *obj, struct opSet *ops)
     Object *video_bitrate;
     Object *audio_bitrate;
     Object *gain;
-    Object *two_pass;
     Object *slow_note;
     Object *hint;
     Object *error;
@@ -457,9 +450,8 @@ static Object *profile_new(struct IClass *cl, Object *obj, struct opSet *ops)
         MUIA_String_Accept, "0123456789-",
         MUIA_CycleChain, TRUE,
     End;
-    two_pass = CheckMark(FALSE);
     slow_note = TextObject,
-        MUIA_Text_Contents, "H.264, 1080p, and 2-pass are much slower on a G4.",
+        MUIA_Text_Contents, "H.264 and 1080p are much slower on a G4.",
         MUIA_Text_PreParse, "\33c",
         MUIA_ShowMe, FALSE,
     End;
@@ -486,11 +478,6 @@ static Object *profile_new(struct IClass *cl, Object *obj, struct opSet *ops)
             Child, scale,
             Child, field_label("Video kbit/s"),
             Child, video_bitrate,
-            Child, field_label("2-pass"),
-            Child, HGroup,
-                Child, two_pass,
-                Child, RectangleObject, MUIA_Weight, 100, End,
-            End,
             Child, field_label("Audio"),
             Child, audio,
             Child, field_label("Audio kbit/s"),
@@ -535,7 +522,6 @@ static Object *profile_new(struct IClass *cl, Object *obj, struct opSet *ops)
     data->video_bitrate = video_bitrate;
     data->audio_bitrate = audio_bitrate;
     data->gain = gain;
-    data->two_pass = two_pass;
     data->slow_note = slow_note;
     data->hint = hint;
     data->error = error;
@@ -551,8 +537,6 @@ static Object *profile_new(struct IClass *cl, Object *obj, struct opSet *ops)
     DoMethod(scale, MUIM_Notify, MUIA_Cycle_Active, MUIV_EveryTime,
              obj, 1, MUIM_VT_ProfileRefresh);
     DoMethod(audio, MUIM_Notify, MUIA_Cycle_Active, MUIV_EveryTime,
-             obj, 1, MUIM_VT_ProfileRefresh);
-    DoMethod(two_pass, MUIM_Notify, MUIA_Selected, MUIV_EveryTime,
              obj, 1, MUIM_VT_ProfileRefresh);
     DoMethod(save, MUIM_Notify, MUIA_Pressed, FALSE,
              obj, 1, MUIM_VT_ProfileSave);

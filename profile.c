@@ -35,8 +35,7 @@ void VT_ProfileNormalize(VTProfile *profile)
     if (!profile)
         return;
     VT_Trim(profile->name);
-    if (profile->video_codec == VT_VCODEC_COPY)
-        profile->two_pass = FALSE;
+    profile->two_pass = FALSE;
 }
 
 BOOL VT_ProfileNameOK(const char *name)
@@ -125,8 +124,6 @@ BOOL VT_ProfileSlowOnG4(const VTProfile *profile)
     if (profile->video_codec == VT_VCODEC_H264)
         return TRUE;
     if (profile->scale == VT_SCALE_1080 && profile->video_codec != VT_VCODEC_COPY)
-        return TRUE;
-    if (profile->two_pass && profile->video_codec != VT_VCODEC_COPY)
         return TRUE;
     return FALSE;
 }
