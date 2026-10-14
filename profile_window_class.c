@@ -168,7 +168,14 @@ static void read_profile(struct ProfileData *data, VTProfile *out)
     if (scale >= 0 && scale < VT_SCALE_COUNT)
         out->scale = (VTScale)scale;
     out->audio_bitrate = (LONG)xget(data->audio_bitrate, MUIA_String_Integer);
-    out->audio_gain_db = (LONG)xget(data->gain, MUIA_String_Integer);
+    {
+        const char *gain_text = (const char *)xget(data->gain, MUIA_String_Contents);
+        LONG gain = 0;
+
+        if (gain_text && gain_text[0] && !VT_ParseLong(gain_text, &gain))
+            gain = VT_GAIN_DB_MAX + 1;
+        out->audio_gain_db = gain;
+    }
     out->two_pass = xget(data->two_pass, MUIA_Selected) ? TRUE : FALSE;
     VT_ProfileNormalize(out);
 }
@@ -447,7 +454,6 @@ static Object *profile_new(struct IClass *cl, Object *obj, struct opSet *ops)
     gain = StringObject,
         StringFrame,
         MUIA_String_MaxLen, 8,
-        MUIA_String_Integer, TRUE,
         MUIA_String_Accept, "0123456789-",
         MUIA_CycleChain, TRUE,
     End;

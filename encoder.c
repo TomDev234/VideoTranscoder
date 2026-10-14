@@ -4,6 +4,7 @@
  * output and the T: stats file are removed unless the trailer is written.
  */
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -11,9 +12,6 @@
 
 #include <libavcodec/avcodec.h>
 #include <libavcodec/codec.h>
-#include <libavfilter/avfilter.h>
-#include <libavfilter/buffersink.h>
-#include <libavfilter/buffersrc.h>
 #include <libavutil/audio_fifo.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/dict.h>
@@ -42,15 +40,11 @@ struct EncodeCtx {
     AVFrame *decoded;
     AVFrame *scaled;
     AVFrame *audio;
-    AVFrame *filtered;
     AVPacket *packet;
     AVPacket *encoded;
     struct SwsContext *sws;
     struct SwrContext *swr;
     AVAudioFifo *fifo;
-    AVFilterGraph *graph;
-    AVFilterContext *asrc;
-    AVFilterContext *asink;
     AVStream *vst;
     AVStream *ast;
     const volatile LONG *cancel;
@@ -459,25 +453,94 @@ static int emit_audio(struct EncodeCtx *cx, AVFrame *frame)
     return drain_audio(cx, FALSE);
 }
 
-static int pull_gain(struct EncodeCtx *cx)
+static BOOL scale_plane(uint8_t *samples, enum AVSampleFormat format, int count, double linear)
 {
-    int err;
+    int index;
 
-    if (!cx->asink)
-        return 0;
-    for (;;) {
-        if (stopped(cx))
-            return AVERROR_EXIT;
-        err = av_buffersink_get_frame(cx->asink, cx->filtered);
-        if (err == AVERROR(EAGAIN) || err == AVERROR_EOF)
-            return 0;
-        if (err < 0)
-            return fail(cx, err, "Could not apply audio gain.");
-        err = emit_audio(cx, cx->filtered);
-        av_frame_unref(cx->filtered);
-        if (err < 0)
-            return err;
+    switch (format) {
+    case AV_SAMPLE_FMT_U8:
+        for (index = 0; index < count; index++) {
+            double value = ((int)samples[index] - 128) * linear;
+
+            if (value > 127.0)
+                value = 127.0;
+            if (value < -128.0)
+                value = -128.0;
+            samples[index] = (uint8_t)((int)value + 128);
+        }
+        return TRUE;
+    case AV_SAMPLE_FMT_S16: {
+        int16_t *data = (int16_t *)samples;
+
+        for (index = 0; index < count; index++) {
+            double value = data[index] * linear;
+
+            if (value > 32767.0)
+                value = 32767.0;
+            if (value < -32768.0)
+                value = -32768.0;
+            data[index] = (int16_t)value;
+        }
+        return TRUE;
     }
+    case AV_SAMPLE_FMT_S32: {
+        int32_t *data = (int32_t *)samples;
+
+        for (index = 0; index < count; index++) {
+            double value = data[index] * linear;
+
+            if (value > 2147483647.0)
+                value = 2147483647.0;
+            if (value < -2147483648.0)
+                value = -2147483648.0;
+            data[index] = (int32_t)value;
+        }
+        return TRUE;
+    }
+    case AV_SAMPLE_FMT_FLT: {
+        float *data = (float *)samples;
+
+        for (index = 0; index < count; index++)
+            data[index] = (float)(data[index] * linear);
+        return TRUE;
+    }
+    case AV_SAMPLE_FMT_DBL: {
+        double *data = (double *)samples;
+
+        for (index = 0; index < count; index++)
+            data[index] *= linear;
+        return TRUE;
+    }
+    default:
+        return FALSE;
+    }
+}
+
+static int apply_gain(AVFrame *frame, LONG gain_db)
+{
+    double linear;
+    enum AVSampleFormat packed;
+    int planar;
+    int planes;
+    int count;
+    int plane;
+
+    if (!frame || gain_db == 0)
+        return 0;
+    linear = pow(10.0, (double)gain_db / 20.0);
+    packed = av_get_packed_sample_fmt((enum AVSampleFormat)frame->format);
+    planar = av_sample_fmt_is_planar((enum AVSampleFormat)frame->format);
+    planes = planar ? frame->ch_layout.nb_channels : 1;
+    count = planar ? frame->nb_samples : frame->nb_samples * frame->ch_layout.nb_channels;
+    if (planes <= 0 || count <= 0)
+        return 0;
+    for (plane = 0; plane < planes; plane++) {
+        if (!frame->extended_data[plane])
+            return -1;
+        if (!scale_plane(frame->extended_data[plane], packed, count, linear))
+            return -1;
+    }
+    return 0;
 }
 
 static int handle_audio(AVFrame *frame, void *user)
@@ -485,24 +548,15 @@ static int handle_audio(AVFrame *frame, void *user)
     struct EncodeCtx *cx = (struct EncodeCtx *)user;
     int err;
 
-    if (!cx->asrc)
-        return emit_audio(cx, frame);
-    err = av_buffersrc_add_frame(cx->asrc, frame);
-    if (err < 0)
-        return fail(cx, err, "Could not apply audio gain.");
-    return pull_gain(cx);
-}
-
-static int flush_gain(struct EncodeCtx *cx)
-{
-    int err;
-
-    if (!cx->asrc)
-        return 0;
-    err = av_buffersrc_add_frame(cx->asrc, NULL);
-    if (err < 0)
-        return fail(cx, err, "Could not apply audio gain.");
-    return pull_gain(cx);
+    if (stopped(cx))
+        return AVERROR_EXIT;
+    if (frame && cx->profile && cx->profile->audio_gain_db != 0) {
+        if ((err = av_frame_make_writable(frame)) < 0)
+            return fail(cx, err, "Out of memory.");
+        if (apply_gain(frame, cx->profile->audio_gain_db) < 0)
+            return fail(cx, 0, "Could not apply audio gain.");
+    }
+    return emit_audio(cx, frame);
 }
 
 static int pull_frames(struct EncodeCtx *cx, AVCodecContext *dec, int (*handle)(AVFrame *, void *))
@@ -800,66 +854,6 @@ static AVStream *add_copy_stream(struct EncodeCtx *cx, int in_index)
     return stream;
 }
 
-static int open_gain(struct EncodeCtx *cx)
-{
-    AVFilterGraph *graph;
-    const AVFilter *src_filter;
-    const AVFilter *vol_filter;
-    const AVFilter *sink_filter;
-    AVFilterContext *src = NULL;
-    AVFilterContext *vol = NULL;
-    AVFilterContext *sink = NULL;
-    char layout_name[128];
-    char args[512];
-    char volume[64];
-    const char *sample_name;
-    int err;
-
-    if (cx->audio_copy || !cx->profile || cx->profile->audio_gain_db == 0)
-        return 0;
-    graph = avfilter_graph_alloc();
-    src_filter = avfilter_get_by_name("abuffer");
-    vol_filter = avfilter_get_by_name("volume");
-    sink_filter = avfilter_get_by_name("abuffersink");
-    sample_name = av_get_sample_fmt_name(cx->adec->sample_fmt);
-    if (!graph || !src_filter || !vol_filter || !sink_filter || !sample_name) {
-        avfilter_graph_free(&graph);
-        return fail(cx, 0, "Could not set up audio gain.");
-    }
-    if (av_channel_layout_describe(&cx->adec->ch_layout, layout_name, sizeof layout_name) < 0) {
-        avfilter_graph_free(&graph);
-        return fail(cx, 0, "Could not set up audio gain.");
-    }
-    snprintf(args, sizeof args,
-             "time_base=1/%d:sample_rate=%d:sample_fmt=%s:channel_layout=%s",
-             cx->adec->sample_rate, cx->adec->sample_rate, sample_name, layout_name);
-    snprintf(volume, sizeof volume, "volume=%lddB", (long)cx->profile->audio_gain_db);
-    err = avfilter_graph_create_filter(&src, src_filter, "in", args, NULL, graph);
-    if (err >= 0)
-        err = avfilter_graph_create_filter(&vol, vol_filter, "gain", volume, NULL, graph);
-    if (err >= 0)
-        err = avfilter_graph_create_filter(&sink, sink_filter, "out", NULL, NULL, graph);
-    if (err >= 0)
-        err = avfilter_link(src, 0, vol, 0);
-    if (err >= 0)
-        err = avfilter_link(vol, 0, sink, 0);
-    if (err >= 0)
-        err = avfilter_graph_config(graph, NULL);
-    if (err < 0) {
-        avfilter_graph_free(&graph);
-        return fail(cx, err, "Could not set up audio gain.");
-    }
-    cx->filtered = av_frame_alloc();
-    if (!cx->filtered) {
-        avfilter_graph_free(&graph);
-        return fail(cx, AVERROR(ENOMEM), "Out of memory.");
-    }
-    cx->graph = graph;
-    cx->asrc = src;
-    cx->asink = sink;
-    return 0;
-}
-
 static int open_audio(struct EncodeCtx *cx)
 {
     const AVCodec *codec;
@@ -905,9 +899,8 @@ static int open_audio(struct EncodeCtx *cx)
         av_channel_layout_uninit(&layout);
         return fail(cx, AVERROR(ENOMEM), "Out of memory.");
     }
-    err = open_gain(cx);
     av_channel_layout_uninit(&layout);
-    return err;
+    return 0;
 }
 
 static int alloc_frames(struct EncodeCtx *cx)
@@ -980,8 +973,6 @@ static int finish_streams(struct EncodeCtx *cx, BOOL video_only)
         return 0;
     if ((err = push_packet(cx, cx->adec, NULL, handle_audio)) < 0)
         return err;
-    if ((err = flush_gain(cx)) < 0)
-        return err;
     if ((err = convert_audio(cx, NULL)) < 0)
         return err;
     return drain_audio(cx, TRUE);
@@ -1006,14 +997,9 @@ static void close_encode(struct EncodeCtx *cx, const char *source, const char *o
         swr_free(&cx->swr);
     if (cx->sws)
         sws_freeContext(cx->sws);
-    if (cx->graph)
-        avfilter_graph_free(&cx->graph);
-    cx->asrc = NULL;
-    cx->asink = NULL;
     av_frame_free(&cx->decoded);
     av_frame_free(&cx->scaled);
     av_frame_free(&cx->audio);
-    av_frame_free(&cx->filtered);
     av_packet_free(&cx->packet);
     av_packet_free(&cx->encoded);
     avcodec_free_context(&cx->vdec);
