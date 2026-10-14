@@ -719,8 +719,24 @@ static int open_video_encoder(struct EncodeCtx *cx, int pass)
     if (cx->global_header)
         enc->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
     if (h264) {
+        const AVCodecContext *dec = cx->vdec;
+
+        /* libx264 enables open GOP unless asked not to. With the fast
+           preset's extra references, players then predict across the
+           keyframe and the picture breaks up. */
+        enc->flags |= AV_CODEC_FLAG_CLOSED_GOP;
+        if (dec) {
+            enc->color_range = dec->color_range;
+            enc->colorspace = dec->colorspace;
+            enc->color_primaries = dec->color_primaries;
+            enc->color_trc = dec->color_trc;
+            enc->chroma_sample_location = dec->chroma_sample_location;
+        }
         av_dict_set(&opts, "preset", "fast", 0);
-        av_dict_set(&opts, "mbtree", "0", 0);
+        /* Pass 1 must use the same ratecontrol as pass 2. The fast
+           preset keeps macroblock-tree on; its stats file is removed
+           with the rest of the 2-pass log. */
+        av_dict_set(&opts, "fastfirstpass", "0", 0);
         av_dict_set(&opts, "threads", "1", 0);
     }
     if ((pass == 1 || pass == 2) && cx->stats_path[0])
