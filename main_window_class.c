@@ -5,7 +5,7 @@
  */
 #include <emul/emulregs.h>
 #include <dos/dos.h>
-#include <intuition/intuition.h>
+#include <libraries/gadtools.h>
 #include <workbench/workbench.h>
 #include <libraries/asl.h>
 #include <proto/dos.h>
