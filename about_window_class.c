@@ -30,9 +30,14 @@ static Object *about_new(struct IClass *cl, Object *obj, struct opSet *ops)
         MUIA_Text_PreParse, "\33l",
     End;
     close_button = SimpleButton("_Close");
+    set(close_button, MUIA_Weight, 0);
     root = VGroup,
         Child, body,
-        Child, close_button,
+        Child, HGroup,
+            Child, RectangleObject, MUIA_Weight, 100, End,
+            Child, close_button,
+            Child, RectangleObject, MUIA_Weight, 100, End,
+        End,
     End;
     if (!root)
         return NULL;
