@@ -832,7 +832,7 @@ static Object *build_menustrip(struct WindowMenuItems *items)
 
     memset(items, 0, sizeof *items);
     items->open = menu_command("Open...", "O", TRUE);
-    items->save = menu_command("Save...", NULL, TRUE);
+    items->save = menu_command("Save...", "S", TRUE);
     bar_list = menu_bar();
     items->add = menu_command("Add...", "A", TRUE);
     items->remove = menu_command("Remove", "R", FALSE);
