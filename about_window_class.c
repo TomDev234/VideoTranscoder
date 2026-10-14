@@ -33,6 +33,11 @@ static Object *about_new(struct IClass *cl, Object *obj, struct opSet *ops)
     set(close_button, MUIA_Weight, 0);
     root = VGroup,
         Child, body,
+        Child, RectangleObject,
+            MUIA_Rectangle_HBar, TRUE,
+            MUIA_FixHeight, 2,
+            MUIA_Weight, 0,
+        End,
         Child, HGroup,
             Child, RectangleObject, MUIA_Weight, 100, End,
             Child, close_button,
