@@ -55,6 +55,8 @@ static Object *about_new(struct IClass *cl, Object *obj, struct opSet *ops)
     snprintf(data->text, sizeof data->text,
              "VideoTranscoder %s\n"
              "\n"
+             "Convert videos like a pro.\n"
+             "\n"
              "Freeware. This program stays offline. It does not phone home and it does not check for updates.\n"
              "\n"
              "The VideoTranscoder binary is free software under the GNU General Public License because it is linked with libx264.\n"

@@ -11,7 +11,7 @@ LIBDIR = -L./lib
 LIBS = -Wl,--start-group \
     -lavdevice -lavfilter -lavformat -lavcodec -lswscale -lswresample \
     -lavutil -lx264 -lmp3lame -lbz2 -lssl_shared -lcrypto_shared \
-    -lz_shared -lpthread -latomic -lm \
+    -lz_shared -lpthread -latomic -lfreevec -lm \
     -Wl,--end-group
 INCDIR = -I./include
 PREFIX = /usr/local
