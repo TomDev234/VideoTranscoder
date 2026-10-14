@@ -1032,7 +1032,6 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     Object *edit_button;
     Object *duplicate_button;
     Object *delete_button;
-    Object *log_button;
     Object *menustrip;
     Object *popup;
     struct WindowMenuItems window_items;
@@ -1093,7 +1092,6 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     edit_button = SimpleButton("Edit");
     duplicate_button = SimpleButton("Duplicate");
     delete_button = SimpleButton("Delete");
-    log_button = SimpleButton("Log");
 
     root = VGroup,
         Child, HGroup,
@@ -1126,7 +1124,6 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
             Child, add_button,
             Child, remove_button,
             Child, clear_button,
-            Child, log_button,
             Child, RectangleObject, MUIA_Weight, 100, End,
             Child, start_button,
             Child, stop_button,
@@ -1209,7 +1206,6 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     DoMethod(edit_button, MUIM_Notify, MUIA_Pressed, FALSE, obj, 1, MUIM_VT_EditProfile);
     DoMethod(duplicate_button, MUIM_Notify, MUIA_Pressed, FALSE, obj, 1, MUIM_VT_DuplicateProfile);
     DoMethod(delete_button, MUIM_Notify, MUIA_Pressed, FALSE, obj, 1, MUIM_VT_DeleteProfile);
-    DoMethod(log_button, MUIM_Notify, MUIA_Pressed, FALSE, obj, 1, MUIM_VT_ShowLog);
     DoMethod(profile_cycle, MUIM_Notify, MUIA_Cycle_Active, MUIV_EveryTime,
              obj, 1, MUIM_VT_ProfileCycle);
     DoMethod(batch, MUIM_Notify, MUIA_List_Active, MUIV_EveryTime,
