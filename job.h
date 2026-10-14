@@ -70,4 +70,12 @@ void VT_JobSetProbe(VTJob *job, long long duration_us, const char *video_name,
 /* Waiting jobs only. Never overwrites an existing file: name, name-2, name-3, ... */
 BOOL VT_JobAssignOutput(VTJob *job, const char *output_drawer);
 
+#define VT_JOBLIST_MAGIC          "VTJOBS"
+#define VT_JOBLIST_FORMAT_VERSION 1L
+#define VT_JOBLIST_SUFFIX         ".jobs"
+
+/* Replaces list only after the whole file has been read. */
+BOOL VT_JobListLoad(VTJobList *list, const char *path);
+BOOL VT_JobListSave(const VTJobList *list, const char *path);
+
 #endif

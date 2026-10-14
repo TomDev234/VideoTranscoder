@@ -64,6 +64,11 @@ typedef struct VTProfileStore {
 
 void VT_ProfileSetDefaults(VTProfile *profile);
 void VT_ProfileNormalize(VTProfile *profile);
+
+/* Profile fields only, without the file header. */
+BOOL VT_ProfileFormatKeys(const VTProfile *profile, char *text, ULONG text_len);
+/* *known is set when key belongs to a profile. FALSE means that value is illegal. */
+BOOL VT_ProfileApplyKey(VTProfile *profile, const char *key, const char *value, BOOL *known);
 BOOL VT_ProfileNameOK(const char *name);
 BOOL VT_ProfileVideoBitrateOK(VTVideoCodec codec, LONG bitrate);
 LONG VT_ProfileAudioBitrateMax(VTAudioCodec codec);

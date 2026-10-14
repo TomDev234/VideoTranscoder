@@ -294,7 +294,7 @@ static BOOL profile_path(const VTProfile *profile, char *out, ULONG out_len)
     return VT_JoinDrawerFile(VT_PROFILES_DIR, file_name, out, out_len);
 }
 
-static BOOL format_profile(const VTProfile *profile, char *text, ULONG text_len)
+BOOL VT_ProfileFormatKeys(const VTProfile *profile, char *text, ULONG text_len)
 {
     const char *container;
     const char *video;
@@ -302,6 +302,8 @@ static BOOL format_profile(const VTProfile *profile, char *text, ULONG text_len)
     const char *scale;
     int wrote;
 
+    if (!profile || !text || text_len == 0)
+        return FALSE;
     container = VT_ContainerToken(profile->container);
     video = VT_VideoCodecToken(profile->video_codec);
     audio = VT_AudioCodecToken(profile->audio_codec);
@@ -309,7 +311,6 @@ static BOOL format_profile(const VTProfile *profile, char *text, ULONG text_len)
     if (!container || !video || !audio || !scale)
         return FALSE;
     wrote = snprintf(text, text_len,
-                     "%s %ld\n"
                      "name=%s\n"
                      "container=%s\n"
                      "video=%s\n"
@@ -319,8 +320,6 @@ static BOOL format_profile(const VTProfile *profile, char *text, ULONG text_len)
                      "audio=%s\n"
                      "audio_bitrate=%ld\n"
                      "gain_db=%ld\n",
-                     VT_PROFILE_MAGIC,
-                     (long)VT_PROFILE_FORMAT_VERSION,
                      profile->name,
                      container,
                      video,
@@ -330,6 +329,73 @@ static BOOL format_profile(const VTProfile *profile, char *text, ULONG text_len)
                      audio,
                      (long)profile->audio_bitrate,
                      (long)profile->audio_gain_db);
+    if (wrote < 0 || (ULONG)wrote >= text_len)
+        return FALSE;
+    return TRUE;
+}
+
+BOOL VT_ProfileApplyKey(VTProfile *profile, const char *key, const char *value, BOOL *known)
+{
+    LONG number;
+
+    if (known)
+        *known = FALSE;
+    if (!profile || !key || !value)
+        return FALSE;
+    if (VT_StrEq(key, "name")) {
+        if (known)
+            *known = TRUE;
+        return VT_StrCopy(profile->name, sizeof profile->name, value);
+    }
+    if (VT_StrEq(key, "container")) {
+        if (known)
+            *known = TRUE;
+        return VT_ContainerFromToken(value, &profile->container);
+    }
+    if (VT_StrEq(key, "video")) {
+        if (known)
+            *known = TRUE;
+        return VT_VideoCodecFromToken(value, &profile->video_codec);
+    }
+    if (VT_StrEq(key, "audio")) {
+        if (known)
+            *known = TRUE;
+        return VT_AudioCodecFromToken(value, &profile->audio_codec);
+    }
+    if (VT_StrEq(key, "scale")) {
+        if (known)
+            *known = TRUE;
+        return VT_ProfileScaleFromToken(value, &profile->scale);
+    }
+    if (!VT_StrEq(key, "video_bitrate") && !VT_StrEq(key, "audio_bitrate") &&
+        !VT_StrEq(key, "gain_db") && !VT_StrEq(key, "two_pass"))
+        return TRUE;
+    if (known)
+        *known = TRUE;
+    if (!VT_ParseLong(value, &number))
+        return FALSE;
+    if (VT_StrEq(key, "video_bitrate"))
+        profile->video_bitrate = number;
+    else if (VT_StrEq(key, "audio_bitrate"))
+        profile->audio_bitrate = number;
+    else if (VT_StrEq(key, "gain_db"))
+        profile->audio_gain_db = number;
+    else if (number == 0 || number == 1)
+        profile->two_pass = number ? TRUE : FALSE;
+    else
+        return FALSE;
+    return TRUE;
+}
+
+static BOOL format_profile(const VTProfile *profile, char *text, ULONG text_len)
+{
+    char keys[512];
+    int wrote;
+
+    if (!VT_ProfileFormatKeys(profile, keys, sizeof keys))
+        return FALSE;
+    wrote = snprintf(text, text_len, "%s %ld\n%s",
+                     VT_PROFILE_MAGIC, (long)VT_PROFILE_FORMAT_VERSION, keys);
     if (wrote < 0 || (ULONG)wrote >= text_len)
         return FALSE;
     return TRUE;
@@ -550,7 +616,7 @@ static BOOL apply_profile_line(const char *line, APTR user)
     ProfileParse *state = (ProfileParse *)user;
     char key[32];
     char value[VT_NAME_LEN];
-    LONG number;
+    BOOL known = FALSE;
 
     if (!state->saw_header) {
         if (!VT_IsFormatHeader(line, VT_PROFILE_MAGIC, VT_PROFILE_FORMAT_VERSION))
@@ -560,37 +626,10 @@ static BOOL apply_profile_line(const char *line, APTR user)
     }
     if (!VT_ParseKeyValue(line, key, sizeof key, value, sizeof value))
         return FALSE;
-
-    if (VT_StrEq(key, "name")) {
-        if (!VT_StrCopy(state->profile->name, sizeof state->profile->name, value))
-            return FALSE;
+    if (!VT_ProfileApplyKey(state->profile, key, value, &known))
+        return FALSE;
+    if (known && VT_StrEq(key, "name"))
         state->saw_name = TRUE;
-        return TRUE;
-    }
-    if (VT_StrEq(key, "container"))
-        return VT_ContainerFromToken(value, &state->profile->container);
-    if (VT_StrEq(key, "video"))
-        return VT_VideoCodecFromToken(value, &state->profile->video_codec);
-    if (VT_StrEq(key, "audio"))
-        return VT_AudioCodecFromToken(value, &state->profile->audio_codec);
-    if (VT_StrEq(key, "scale"))
-        return VT_ProfileScaleFromToken(value, &state->profile->scale);
-    if (VT_StrEq(key, "video_bitrate") || VT_StrEq(key, "audio_bitrate") ||
-        VT_StrEq(key, "gain_db") || VT_StrEq(key, "two_pass")) {
-        if (!VT_ParseLong(value, &number))
-            return FALSE;
-        if (VT_StrEq(key, "video_bitrate"))
-            state->profile->video_bitrate = number;
-        else if (VT_StrEq(key, "audio_bitrate"))
-            state->profile->audio_bitrate = number;
-        else if (VT_StrEq(key, "gain_db"))
-            state->profile->audio_gain_db = number;
-        else if (number == 0 || number == 1)
-            state->profile->two_pass = number ? TRUE : FALSE;
-        else
-            return FALSE;
-        return TRUE;
-    }
     return TRUE;
 }
 

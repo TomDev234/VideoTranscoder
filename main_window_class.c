@@ -45,6 +45,8 @@ struct MainData {
     const char *cycle_entries[VT_PROFILE_MAX + 1];
     char status_buf[160];
     char add_drawer[VT_PATH_LEN];
+    char job_drawer[VT_PATH_LEN];
+    char job_file[VT_PATH_LEN];
     ULONG shown_job;
     BOOL quiet;
 };
@@ -52,6 +54,7 @@ struct MainData {
 static const char *cycle_placeholder[] = { "", NULL };
 
 static void update_job_menus(struct MainData *data);
+static void show_log(struct MainData *data, const VTJob *job, BOOL open_window);
 
 static void set_status(struct MainData *data, const char *text)
 {
@@ -340,13 +343,139 @@ static ULONG main_drop(struct MainData *data, struct AppMessage *message)
     return 0;
 }
 
+static BOOL ask_job_file(struct MainData *data, Object *obj, BOOL save_mode, char *out, ULONG out_len)
+{
+    struct FileRequester *request;
+    struct TagItem ask[4];
+    char full[VT_PATH_LEN];
+
+    request = MUI_AllocAslRequestTags(ASL_FileRequest,
+                                      ASLFR_TitleText, (ULONG)(save_mode ? "Save job list" : "Open job list"),
+                                      ASLFR_DoSaveMode, save_mode,
+                                      ASLFR_DoPatterns, TRUE,
+                                      ASLFR_InitialPattern, (ULONG)"#?.jobs",
+                                      ASLFR_RejectIcons, TRUE,
+                                      TAG_DONE);
+    if (!request) {
+        set_status(data, save_mode ? "Could not save the job list." : "Could not open the job list.");
+        return FALSE;
+    }
+    ask[0].ti_Tag = ASLFR_Window;
+    ask[0].ti_Data = (IPTR)_window(obj);
+    ask[1].ti_Tag = ASLFR_InitialDrawer;
+    ask[1].ti_Data = (IPTR)data->job_drawer;
+    ask[2].ti_Tag = ASLFR_InitialFile;
+    ask[2].ti_Data = (IPTR)data->job_file;
+    ask[3].ti_Tag = TAG_END;
+    ask[3].ti_Data = 0;
+    if (!MUI_AslRequest(request, ask) || !request->fr_Drawer || !request->fr_File || !request->fr_File[0] ||
+        !VT_JoinDrawerFile(request->fr_Drawer, request->fr_File, full, sizeof full)) {
+        MUI_FreeAslRequest(request);
+        return FALSE;
+    }
+    if (save_mode && !VT_EndsWithI(full, VT_JOBLIST_SUFFIX)) {
+        char with_suffix[VT_PATH_LEN];
+        int wrote = snprintf(with_suffix, sizeof with_suffix, "%s%s", full, VT_JOBLIST_SUFFIX);
+
+        if (wrote < 0 || (ULONG)wrote >= sizeof with_suffix) {
+            MUI_FreeAslRequest(request);
+            set_status(data, "Could not save the job list.");
+            return FALSE;
+        }
+        VT_StrCopy(full, sizeof full, with_suffix);
+    }
+    VT_StrCopy(data->job_drawer, sizeof data->job_drawer, request->fr_Drawer);
+    VT_StrCopy(data->job_file, sizeof data->job_file, request->fr_File);
+    if (save_mode && !VT_EndsWithI(data->job_file, VT_JOBLIST_SUFFIX)) {
+        char with_suffix[VT_PATH_LEN];
+        int wrote = snprintf(with_suffix, sizeof with_suffix, "%s%s", data->job_file, VT_JOBLIST_SUFFIX);
+
+        if (wrote >= 0 && (ULONG)wrote < sizeof with_suffix)
+            VT_StrCopy(data->job_file, sizeof data->job_file, with_suffix);
+    }
+    MUI_FreeAslRequest(request);
+    return VT_StrCopy(out, out_len, full);
+}
+
+static ULONG main_open_jobs(struct MainData *data, Object *obj)
+{
+    char path[VT_PATH_LEN];
+    LONG choice;
+
+    if (!data->jobs) {
+        set_status(data, "The queue is not available.");
+        return 0;
+    }
+    if (VT_Encode_IsRunning()) {
+        set_status(data, "Stop the queue before opening a job list.");
+        return 0;
+    }
+    if (!ask_job_file(data, obj, FALSE, path, sizeof path))
+        return 0;
+    if (data->jobs->count > 0) {
+        choice = MUI_RequestA(_app(obj), obj, 0, "Open job list", "Cancel|Replace",
+                              "Replace the current job list?", NULL);
+        if (choice != 2)
+            return 0;
+    }
+    if (!VT_JobListLoad(data->jobs, path)) {
+        set_status(data, "Could not read the job list.");
+        return 0;
+    }
+    data->shown_job = 0;
+    refresh_jobs(data);
+    data->quiet = TRUE;
+    nnset(data->batch, MUIA_List_Active, MUIV_List_Active_Off);
+    data->quiet = FALSE;
+    update_job_menus(data);
+    if (data->job_log && xget(data->job_log, MUIA_Window_Open))
+        show_log(data, NULL, FALSE);
+    if (data->jobs->count == 0)
+        set_status(data, "Opened an empty job list.");
+    else if (data->jobs->count == 1)
+        set_status(data, "Opened 1 job.");
+    else {
+        snprintf(data->status_buf, sizeof data->status_buf, "Opened %lu jobs.",
+                 (unsigned long)data->jobs->count);
+        set_status(data, data->status_buf);
+    }
+    return 0;
+}
+
+static ULONG main_save_jobs(struct MainData *data, Object *obj)
+{
+    char path[VT_PATH_LEN];
+    LONG choice;
+
+    if (!data->jobs) {
+        set_status(data, "The queue is not available.");
+        return 0;
+    }
+    if (!ask_job_file(data, obj, TRUE, path, sizeof path))
+        return 0;
+    if (VT_FileExists(path)) {
+        choice = MUI_RequestA(_app(obj), obj, 0, "Save job list", "Cancel|Replace",
+                              "Replace the existing file?", NULL);
+        if (choice != 2)
+            return 0;
+    }
+    if (!VT_JobListSave(data->jobs, path)) {
+        set_status(data, "Could not save the job list.");
+        return 0;
+    }
+    set_status(data, "Job list saved.");
+    return 0;
+}
+
 static void show_log(struct MainData *data, const VTJob *job, BOOL open_window)
 {
     struct MUIP_VT_JobLogUse msg;
 
-    if (!data->job_log || !job)
+    if (!data->job_log)
         return;
-    data->shown_job = job->id;
+    if (!job && open_window)
+        return;
+    data->shown_job = job ? job->id : 0;
     msg.MethodID = MUIM_VT_JobLogUse;
     msg.job = (const struct VTJob *)job;
     msg.open_window = open_window;
@@ -665,6 +794,8 @@ static void bind_item(Object *item, Object *window, ULONG method)
 }
 
 struct WindowMenuItems {
+    Object *open;
+    Object *save;
     Object *add;
     Object *remove;
     Object *clear;
@@ -691,14 +822,18 @@ struct PopupMenuItems {
 
 static Object *build_menustrip(struct WindowMenuItems *items)
 {
+    Object *bar_list;
     Object *bar_jobs;
     Object *bar_run;
     Object *bar_quit;
     Object *strip;
-    Object *owned[16];
+    Object *owned[20];
     ULONG count = 0;
 
     memset(items, 0, sizeof *items);
+    items->open = menu_command("Open...", "O", TRUE);
+    items->save = menu_command("Save...", NULL, TRUE);
+    bar_list = menu_bar();
     items->add = menu_command("Add...", "A", TRUE);
     items->remove = menu_command("Remove", "R", FALSE);
     items->clear = menu_command("Clear", "C", TRUE);
@@ -714,6 +849,9 @@ static Object *build_menustrip(struct WindowMenuItems *items)
     items->duplicate_item = menu_command("Duplicate", "U", TRUE);
     items->delete_item = menu_command("Delete", "D", TRUE);
     items->log = menu_command("Show log", "L", FALSE);
+    owned[count++] = items->open;
+    owned[count++] = items->save;
+    owned[count++] = bar_list;
     owned[count++] = items->add;
     owned[count++] = items->remove;
     owned[count++] = items->clear;
@@ -729,7 +867,8 @@ static Object *build_menustrip(struct WindowMenuItems *items)
     owned[count++] = items->duplicate_item;
     owned[count++] = items->delete_item;
     owned[count++] = items->log;
-    if (!items->add || !items->remove || !items->clear || !bar_jobs || !items->start ||
+    if (!items->open || !items->save || !bar_list || !items->add || !items->remove ||
+        !items->clear || !bar_jobs || !items->start ||
         !items->stop || !bar_run || !items->about || !bar_quit || !items->quit ||
         !items->new_item || !items->edit_item || !items->duplicate_item ||
         !items->delete_item || !items->log) {
@@ -740,6 +879,9 @@ static Object *build_menustrip(struct WindowMenuItems *items)
     strip = MenustripObject,
         Child, MenuObject,
             MUIA_Menu_Title, "Project",
+            Child, items->open,
+            Child, items->save,
+            Child, bar_list,
             Child, items->add,
             Child, items->remove,
             Child, items->clear,
@@ -1045,6 +1187,8 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     data->popup_resume = popup_items.resume;
     data->quiet = FALSE;
     data->add_drawer[0] = '\0';
+    data->job_drawer[0] = '\0';
+    VT_StrCopy(data->job_file, sizeof data->job_file, "Jobs.jobs");
     data->shown_job = 0;
     VT_StrCopyTrunc(data->status_buf, sizeof data->status_buf,
                     "Add files, choose a profile and an output drawer.");
@@ -1075,6 +1219,8 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     DoMethod(obj, MUIM_Notify, MUIA_Window_CloseRequest, TRUE, obj, 1, MUIM_VT_Close);
     DoMethod(obj, MUIM_Notify, MUIA_AppMessage, MUIV_EveryTime,
              obj, 2, MUIM_VT_Drop, MUIV_TriggerValue);
+    bind_item(window_items.open, obj, MUIM_VT_OpenJobs);
+    bind_item(window_items.save, obj, MUIM_VT_SaveJobs);
     bind_item(window_items.add, obj, MUIM_VT_AddFiles);
     bind_item(window_items.remove, obj, MUIM_VT_RemoveJob);
     bind_item(window_items.clear, obj, MUIM_VT_ClearJobs);
@@ -1107,6 +1253,10 @@ DISPATCHER(MainWindow)
     switch (msg->MethodID) {
     case OM_NEW:
         return (ULONG)main_new(cl, obj, (struct opSet *)msg);
+    case MUIM_VT_OpenJobs:
+        return main_open_jobs(data, obj);
+    case MUIM_VT_SaveJobs:
+        return main_save_jobs(data, obj);
     case MUIM_VT_AddFiles:
         return main_add(data, obj);
     case MUIM_VT_Drop:

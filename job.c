@@ -293,3 +293,322 @@ BOOL VT_JobAssignOutput(VTJob *job, const char *output_drawer)
     }
     return FALSE;
 }
+
+static const char *status_token(VTJobStatus status)
+{
+    switch (status) {
+    case VT_JOB_WAITING:
+        return "waiting";
+    case VT_JOB_RUNNING:
+        return "running";
+    case VT_JOB_DONE:
+        return "done";
+    case VT_JOB_FAILED:
+        return "failed";
+    case VT_JOB_CANCELLED:
+        return "cancelled";
+    default:
+        return NULL;
+    }
+}
+
+static BOOL status_from_token(const char *token, VTJobStatus *out)
+{
+    VTJobStatus status;
+
+    if (!token || !out)
+        return FALSE;
+    for (status = VT_JOB_WAITING; status <= VT_JOB_CANCELLED; status++) {
+        const char *name = status_token(status);
+
+        if (name && VT_StrEq(token, name)) {
+            *out = status;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static BOOL parse_u64(const char *text, unsigned long long *out)
+{
+    unsigned long long value = 0;
+    BOOL any = FALSE;
+
+    if (!text || !out)
+        return FALSE;
+    while (*text >= '0' && *text <= '9') {
+        unsigned long long digit = (unsigned long long)(*text - '0');
+
+        if (value > (~0ULL - digit) / 10ULL)
+            return FALSE;
+        value = value * 10ULL + digit;
+        any = TRUE;
+        text++;
+    }
+    if (!any || *text != '\0')
+        return FALSE;
+    *out = value;
+    return TRUE;
+}
+
+static void format_u64(char *out, ULONG out_len, unsigned long long value)
+{
+    char digits[32];
+    ULONG count = 0;
+    ULONG index;
+
+    if (!out || out_len == 0)
+        return;
+    if (value == 0) {
+        VT_StrCopy(out, out_len, "0");
+        return;
+    }
+    while (value > 0 && count < sizeof digits) {
+        digits[count++] = (char)('0' + (int)(value % 10ULL));
+        value /= 10ULL;
+    }
+    if (count + 1 > out_len) {
+        out[0] = '\0';
+        return;
+    }
+    for (index = 0; index < count; index++)
+        out[index] = digits[count - 1 - index];
+    out[count] = '\0';
+}
+
+static BOOL add_piece(char *text, ULONG cap, ULONG *used, const char *piece)
+{
+    ULONG len;
+
+    if (!text || !used || !piece)
+        return FALSE;
+    len = (ULONG)strlen(piece);
+    if (*used + len + 1 > cap)
+        return FALSE;
+    memcpy(text + *used, piece, len + 1);
+    *used += len;
+    return TRUE;
+}
+
+static BOOL add_job_text(char *text, ULONG cap, ULONG *used, const VTJob *job)
+{
+    char line[VT_PATH_LEN + 64];
+    char keys[512];
+    char duration[32];
+    char bytes[32];
+    const char *token;
+    int wrote;
+
+    token = status_token(job->status);
+    if (!token || !VT_ProfileFormatKeys(&job->profile, keys, sizeof keys))
+        return FALSE;
+    wrote = snprintf(line, sizeof line, "job\nsource=%s\nstatus=%s\nprogress=%ld\n",
+                     job->source_path, token, (long)job->progress);
+    if (wrote < 0 || (ULONG)wrote >= sizeof line || !add_piece(text, cap, used, line))
+        return FALSE;
+    wrote = snprintf(line, sizeof line, "output=%s\n", job->output_path);
+    if (wrote < 0 || (ULONG)wrote >= sizeof line || !add_piece(text, cap, used, line))
+        return FALSE;
+    wrote = snprintf(line, sizeof line, "error=%s\n", job->error);
+    if (wrote < 0 || (ULONG)wrote >= sizeof line || !add_piece(text, cap, used, line))
+        return FALSE;
+    format_u64(duration, sizeof duration,
+               job->duration_us < 0 ? 0ULL : (unsigned long long)job->duration_us);
+    format_u64(bytes, sizeof bytes, job->size_bytes);
+    wrote = snprintf(line, sizeof line,
+                     "duration_us=%s\nprobe_video=%s\nprobe_audio=%s\nsize_bytes=%s\nhas_probe=%ld\n",
+                     duration, job->probe_video, job->probe_audio, bytes,
+                     job->has_probe ? 1L : 0L);
+    if (wrote < 0 || (ULONG)wrote >= sizeof line || !add_piece(text, cap, used, line))
+        return FALSE;
+    return add_piece(text, cap, used, keys);
+}
+
+BOOL VT_JobListSave(const VTJobList *list, const char *path)
+{
+    char *text;
+    ULONG cap;
+    ULONG used = 0;
+    ULONG index;
+    BOOL ok;
+    int wrote;
+
+    if (!list || !path || !path[0])
+        return FALSE;
+    cap = 32;
+    for (index = 0; index < list->count; index++) {
+        const VTJob *job = list->items[index];
+
+        if (!job || !VT_IsSingleLine(job->source_path) || !VT_IsSingleLine(job->output_path) ||
+            !VT_IsSingleLine(job->error) || !VT_IsSingleLine(job->probe_video) ||
+            !VT_IsSingleLine(job->probe_audio))
+            return FALSE;
+        cap += (ULONG)strlen(job->source_path) + (ULONG)strlen(job->output_path) +
+               (ULONG)strlen(job->error) + 800;
+    }
+    if (cap > (ULONG)VT_TEXT_FILE_MAX)
+        return FALSE;
+    text = (char *)AllocVec(cap, MEMF_PUBLIC | MEMF_CLEAR);
+    if (!text)
+        return FALSE;
+    wrote = snprintf(text, cap, "%s %ld\n", VT_JOBLIST_MAGIC, (long)VT_JOBLIST_FORMAT_VERSION);
+    if (wrote < 0 || (ULONG)wrote >= cap) {
+        FreeVec(text);
+        return FALSE;
+    }
+    used = (ULONG)wrote;
+    for (index = 0; index < list->count; index++) {
+        if (!add_job_text(text, cap, &used, list->items[index])) {
+            FreeVec(text);
+            return FALSE;
+        }
+    }
+    ok = VT_WriteTextFileAtomic(path, text);
+    FreeVec(text);
+    return ok;
+}
+
+static BOOL commit_draft(VTJobList *list, VTJob *draft)
+{
+    VTJob *job;
+
+    if (!draft->source_path[0] || !VT_BaseName(draft->source_path, draft->source_name,
+                                               sizeof draft->source_name))
+        return FALSE;
+    VT_ProfileNormalize(&draft->profile);
+    if (!VT_ProfileValidate(&draft->profile))
+        return FALSE;
+    if (draft->progress < 0 || draft->progress > 100)
+        return FALSE;
+    if (draft->status == VT_JOB_RUNNING) {
+        draft->status = VT_JOB_WAITING;
+        draft->progress = 0;
+        draft->output_path[0] = '\0';
+        draft->error[0] = '\0';
+    }
+    if (list->count >= VT_JOB_MAX)
+        return FALSE;
+    if (list->count == list->capacity) {
+        if (!VT_ArrayGrow((APTR *)&list->items, &list->capacity, list->count,
+                          sizeof(VTJob *), VT_JOB_MAX))
+            return FALSE;
+    }
+    job = (VTJob *)AllocVec(sizeof *job, MEMF_PUBLIC | MEMF_CLEAR);
+    if (!job)
+        return FALSE;
+    *job = *draft;
+    job->id = take_id(list);
+    list->items[list->count++] = job;
+    return TRUE;
+}
+
+typedef struct JobParse {
+    VTJobList *list;
+    VTJob *draft;
+    BOOL saw_header;
+    BOOL in_job;
+} JobParse;
+
+static void reset_draft(VTJob *draft)
+{
+    memset(draft, 0, sizeof *draft);
+    VT_ProfileSetDefaults(&draft->profile);
+    draft->status = VT_JOB_WAITING;
+}
+
+static BOOL apply_job_line(const char *line, APTR user)
+{
+    JobParse *state = (JobParse *)user;
+    char key[32];
+    char value[VT_PATH_LEN];
+    LONG number;
+    unsigned long long big;
+
+    if (!state->saw_header) {
+        if (!VT_IsFormatHeader(line, VT_JOBLIST_MAGIC, VT_JOBLIST_FORMAT_VERSION))
+            return FALSE;
+        state->saw_header = TRUE;
+        return TRUE;
+    }
+    if (VT_StrEq(line, "job")) {
+        if (state->in_job && !commit_draft(state->list, state->draft))
+            return FALSE;
+        reset_draft(state->draft);
+        state->in_job = TRUE;
+        return TRUE;
+    }
+    if (!state->in_job || !VT_ParseKeyValue(line, key, sizeof key, value, sizeof value))
+        return FALSE;
+    if (VT_StrEq(key, "source"))
+        return VT_StrCopy(state->draft->source_path, sizeof state->draft->source_path, value);
+    if (VT_StrEq(key, "output"))
+        return VT_StrCopy(state->draft->output_path, sizeof state->draft->output_path, value);
+    if (VT_StrEq(key, "error"))
+        return VT_StrCopy(state->draft->error, sizeof state->draft->error, value);
+    if (VT_StrEq(key, "probe_video"))
+        return VT_StrCopy(state->draft->probe_video, sizeof state->draft->probe_video, value);
+    if (VT_StrEq(key, "probe_audio"))
+        return VT_StrCopy(state->draft->probe_audio, sizeof state->draft->probe_audio, value);
+    if (VT_StrEq(key, "status"))
+        return status_from_token(value, &state->draft->status);
+    if (VT_StrEq(key, "progress")) {
+        if (!VT_ParseLong(value, &number))
+            return FALSE;
+        state->draft->progress = number;
+        return TRUE;
+    }
+    if (VT_StrEq(key, "has_probe")) {
+        if (!VT_ParseLong(value, &number) || (number != 0 && number != 1))
+            return FALSE;
+        state->draft->has_probe = number ? TRUE : FALSE;
+        return TRUE;
+    }
+    if (VT_StrEq(key, "duration_us")) {
+        if (!parse_u64(value, &big) || big > 9223372036854775807ULL)
+            return FALSE;
+        state->draft->duration_us = (long long)big;
+        return TRUE;
+    }
+    if (VT_StrEq(key, "size_bytes")) {
+        if (!parse_u64(value, &big))
+            return FALSE;
+        state->draft->size_bytes = big;
+        return TRUE;
+    }
+    return VT_ProfileApplyKey(&state->draft->profile, key, value, NULL);
+}
+
+BOOL VT_JobListLoad(VTJobList *list, const char *path)
+{
+    char *text = NULL;
+    VTJobList loaded;
+    VTJob *draft;
+    JobParse state;
+
+    if (!list || !path || !path[0])
+        return FALSE;
+    draft = (VTJob *)AllocVec(sizeof *draft, MEMF_PUBLIC | MEMF_CLEAR);
+    if (!draft)
+        return FALSE;
+    VT_JobListInit(&loaded);
+    if (!VT_ReadTextFile(path, &text, VT_TEXT_FILE_MAX)) {
+        FreeVec(draft);
+        return FALSE;
+    }
+    state.list = &loaded;
+    state.draft = draft;
+    state.saw_header = FALSE;
+    state.in_job = FALSE;
+    if (!VT_ForEachLine(text, apply_job_line, &state) || !state.saw_header ||
+        (state.in_job && !commit_draft(&loaded, draft))) {
+        VT_FreeText(text);
+        FreeVec(draft);
+        VT_JobListFree(&loaded);
+        return FALSE;
+    }
+    VT_FreeText(text);
+    FreeVec(draft);
+    VT_JobListFree(list);
+    *list = loaded;
+    return TRUE;
+}

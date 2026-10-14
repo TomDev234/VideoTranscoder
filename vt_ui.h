@@ -55,6 +55,8 @@
 #define MUIM_VT_JobLogUse        (VT_TAGBASE + 44)
 #define MUIM_VT_JobSelect        (VT_TAGBASE + 45)
 #define MUIM_VT_ResumeJob        (VT_TAGBASE + 46)
+#define MUIM_VT_OpenJobs         (VT_TAGBASE + 47)
+#define MUIM_VT_SaveJobs         (VT_TAGBASE + 48)
 
 struct MUIP_VT_ProfilesChanged {
     ULONG MethodID;

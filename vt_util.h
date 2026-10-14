@@ -7,7 +7,7 @@
 
 #include "vt_types.h"
 
-#define VT_TEXT_FILE_MAX 65535L
+#define VT_TEXT_FILE_MAX (1024L * 1024L)
 
 typedef BOOL (*VTLineFunc)(const char *line, APTR user);
 
