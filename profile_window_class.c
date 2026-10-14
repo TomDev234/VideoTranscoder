@@ -21,6 +21,7 @@ struct ProfileData {
     Object *name;
     Object *container;
     Object *video;
+    Object *scale;
     Object *audio;
     Object *video_bitrate;
     Object *audio_bitrate;
@@ -42,8 +43,10 @@ struct ProfileData {
 };
 
 static const char *container_entries[VT_CONTAINER_COUNT + 1];
+static const char *scale_entries[VT_SCALE_COUNT + 1];
 static const char *cycle_reset[] = { "", NULL };
 static BOOL container_ready;
+static BOOL scale_ready;
 
 static void prepare_container_entries(void)
 {
@@ -55,6 +58,18 @@ static void prepare_container_entries(void)
         container_entries[index] = VT_ContainerLabel((VTContainer)index);
     container_entries[index] = NULL;
     container_ready = TRUE;
+}
+
+static void prepare_scale_entries(void)
+{
+    ULONG index;
+
+    if (scale_ready)
+        return;
+    for (index = 0; index < VT_SCALE_COUNT; index++)
+        scale_entries[index] = VT_ProfileScaleLabel((VTScale)index);
+    scale_entries[index] = NULL;
+    scale_ready = TRUE;
 }
 
 static BOOL allow_video(VTContainer container, ULONG codec)
@@ -132,6 +147,7 @@ static void read_profile(struct ProfileData *data, VTProfile *out)
     LONG container;
     LONG video_pos;
     LONG audio_pos;
+    LONG scale;
     const char *name;
 
     VT_ProfileSetDefaults(out);
@@ -148,6 +164,9 @@ static void read_profile(struct ProfileData *data, VTProfile *out)
     if (audio_pos >= 0 && (ULONG)audio_pos < data->audio_count)
         out->audio_codec = (VTAudioCodec)data->audio_map[audio_pos];
     out->video_bitrate = (LONG)xget(data->video_bitrate, MUIA_String_Integer);
+    scale = (LONG)xget(data->scale, MUIA_Cycle_Active);
+    if (scale >= 0 && scale < VT_SCALE_COUNT)
+        out->scale = (VTScale)scale;
     out->audio_bitrate = (LONG)xget(data->audio_bitrate, MUIA_String_Integer);
     out->audio_gain_db = (LONG)xget(data->gain, MUIA_String_Integer);
     out->two_pass = xget(data->two_pass, MUIA_Selected) ? TRUE : FALSE;
@@ -161,6 +180,7 @@ static void apply_flags(struct ProfileData *data, const VTProfile *profile)
     LONG audio_max = VT_ProfileAudioBitrateMax(profile->audio_codec);
 
     set(data->video_bitrate, MUIA_Disabled, video_copy);
+    set(data->scale, MUIA_Disabled, video_copy);
     set(data->two_pass, MUIA_Disabled, video_copy);
     set(data->audio_bitrate, MUIA_Disabled, audio_copy);
     set(data->gain, MUIA_Disabled, audio_copy);
@@ -169,10 +189,10 @@ static void apply_flags(struct ProfileData *data, const VTProfile *profile)
 
     if (video_copy && audio_copy) {
         snprintf(data->hint_text, sizeof data->hint_text,
-                 "Streams are copied. Bitrate, gain, and 2-pass are not applied.");
+                 "Streams are copied. Size, bitrate, gain, and 2-pass are not applied.");
     } else if (video_copy) {
         snprintf(data->hint_text, sizeof data->hint_text,
-                 "Video is copied. Audio %ld-%ld kbit/s. Gain %ld to %ld dB.",
+                 "Video is copied at its original size. Audio %ld-%ld kbit/s. Gain %ld to %ld dB.",
                  (long)VT_AUDIO_BITRATE_MIN, (long)audio_max,
                  (long)VT_GAIN_DB_MIN, (long)VT_GAIN_DB_MAX);
     } else if (audio_copy) {
@@ -241,6 +261,7 @@ static void fill_from_profile(struct ProfileData *data, const VTProfile *profile
                VT_ACODEC_COUNT, (ULONG)profile->audio_codec, profile->container,
                allow_audio, label_audio);
     write_long(data->video_bitrate, profile->video_bitrate);
+    nnset(data->scale, MUIA_Cycle_Active, profile->scale);
     write_long(data->audio_bitrate, profile->audio_bitrate);
     write_long(data->gain, profile->audio_gain_db);
     nnset(data->two_pass, MUIA_Selected, profile->two_pass ? TRUE : FALSE);
@@ -368,6 +389,7 @@ static Object *profile_new(struct IClass *cl, Object *obj, struct opSet *ops)
     Object *name;
     Object *container;
     Object *video;
+    Object *scale;
     Object *audio;
     Object *video_bitrate;
     Object *audio_bitrate;
@@ -383,6 +405,7 @@ static Object *profile_new(struct IClass *cl, Object *obj, struct opSet *ops)
     ULONG extra_count = 0;
 
     prepare_container_entries();
+    prepare_scale_entries();
     VT_ProfileSetDefaults(&defaults);
 
     name = StringObject,
@@ -397,6 +420,10 @@ static Object *profile_new(struct IClass *cl, Object *obj, struct opSet *ops)
     End;
     video = CycleObject,
         MUIA_Cycle_Entries, cycle_reset,
+        MUIA_CycleChain, TRUE,
+    End;
+    scale = CycleObject,
+        MUIA_Cycle_Entries, scale_entries,
         MUIA_CycleChain, TRUE,
     End;
     audio = CycleObject,
@@ -426,7 +453,7 @@ static Object *profile_new(struct IClass *cl, Object *obj, struct opSet *ops)
     End;
     two_pass = CheckMark(FALSE);
     slow_note = TextObject,
-        MUIA_Text_Contents, "H.264 and 2-pass are much slower on a G4.",
+        MUIA_Text_Contents, "H.264, 1080p, and 2-pass are much slower on a G4.",
         MUIA_Text_PreParse, "\33c",
         MUIA_ShowMe, FALSE,
     End;
@@ -449,6 +476,8 @@ static Object *profile_new(struct IClass *cl, Object *obj, struct opSet *ops)
             Child, container,
             Child, field_label("Video"),
             Child, video,
+            Child, field_label("Size"),
+            Child, scale,
             Child, field_label("Video kbit/s"),
             Child, video_bitrate,
             Child, field_label("2-pass"),
@@ -495,6 +524,7 @@ static Object *profile_new(struct IClass *cl, Object *obj, struct opSet *ops)
     data->name = name;
     data->container = container;
     data->video = video;
+    data->scale = scale;
     data->audio = audio;
     data->video_bitrate = video_bitrate;
     data->audio_bitrate = audio_bitrate;
@@ -511,6 +541,8 @@ static Object *profile_new(struct IClass *cl, Object *obj, struct opSet *ops)
     DoMethod(container, MUIM_Notify, MUIA_Cycle_Active, MUIV_EveryTime,
              obj, 1, MUIM_VT_ProfileRefresh);
     DoMethod(video, MUIM_Notify, MUIA_Cycle_Active, MUIV_EveryTime,
+             obj, 1, MUIM_VT_ProfileRefresh);
+    DoMethod(scale, MUIM_Notify, MUIA_Cycle_Active, MUIV_EveryTime,
              obj, 1, MUIM_VT_ProfileRefresh);
     DoMethod(audio, MUIM_Notify, MUIA_Cycle_Active, MUIV_EveryTime,
              obj, 1, MUIM_VT_ProfileRefresh);

@@ -707,9 +707,13 @@ static int open_video_encoder(struct EncodeCtx *cx, int pass)
     enc->gop_size = h264 ? 250 : 15;
     enc->max_b_frames = 0;
     enc->thread_count = 1;
-    enc->sample_aspect_ratio = cx->in->streams[cx->video_index]->sample_aspect_ratio;
-    if (enc->sample_aspect_ratio.num <= 0 || enc->sample_aspect_ratio.den <= 0)
+    if (!cx->profile || cx->profile->scale == VT_SCALE_ORIGINAL) {
+        enc->sample_aspect_ratio = cx->in->streams[cx->video_index]->sample_aspect_ratio;
+        if (enc->sample_aspect_ratio.num <= 0 || enc->sample_aspect_ratio.den <= 0)
+            enc->sample_aspect_ratio = av_make_q(1, 1);
+    } else {
         enc->sample_aspect_ratio = av_make_q(1, 1);
+    }
     if (pass == 1)
         enc->flags |= AV_CODEC_FLAG_PASS1;
     if (pass == 2) {
@@ -1115,11 +1119,15 @@ VTEncodeResult VT_EncodeFile(const char *source, const char *output, const VTPro
     } else {
         if ((err = open_decoder(&cx, &cx.vdec, cx.video_index)) < 0)
             goto cleanup;
-        cx.enc_w = cx.vdec->width & ~1;
-        cx.enc_h = cx.vdec->height & ~1;
-        if (cx.enc_w < 2 || cx.enc_h < 2) {
-            fail(&cx, 0, "The picture size is unusable.");
-            goto cleanup;
+        {
+            AVRational sar = cx.in->streams[cx.video_index]->sample_aspect_ratio;
+
+            if (!VT_ProfileFrameSize(profile, cx.vdec->width, cx.vdec->height,
+                                     sar.num, sar.den, &cx.enc_w, &cx.enc_h) ||
+                cx.enc_w < 2 || cx.enc_h < 2) {
+                fail(&cx, 0, "The picture size is unusable.");
+                goto cleanup;
+            }
         }
     }
     if (cx.audio_copy && cx.audio_index >= 0) {

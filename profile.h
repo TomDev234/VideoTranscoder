@@ -6,7 +6,8 @@
  *
  * On disk: PROGDIR:Profiles/<name>.profile
  *   VTPROFILE 1
- *   name, container, video, video_bitrate, two_pass, audio, audio_bitrate, gain_db
+ *   name, container, video, video_bitrate, scale, two_pass, audio, audio_bitrate, gain_db
+ * scale is original, 576, 720, or 1080. Older files omit it and stay original.
  */
 #ifndef VT_PROFILE_H
 #define VT_PROFILE_H
@@ -28,15 +29,25 @@
 #define VT_GAIN_DB_MIN            (-24L)
 #define VT_GAIN_DB_MAX            24L
 
-/* Moderate G4 defaults: MPEG-4 / MP3 / MKV, single pass. */
+/* Moderate G4 defaults: MPEG-4 / MP3 / MKV, single pass, original size. */
 #define VT_DEFAULT_VIDEO_BITRATE  2500L
 #define VT_DEFAULT_AUDIO_BITRATE  192L
+
+/* Target picture height. Original keeps the source size. */
+typedef enum {
+    VT_SCALE_ORIGINAL = 0,
+    VT_SCALE_576 = 1,
+    VT_SCALE_720 = 2,
+    VT_SCALE_1080 = 3,
+    VT_SCALE_COUNT = 4
+} VTScale;
 
 typedef struct VTProfile {
     char name[VT_NAME_LEN];
     VTContainer container;
     VTVideoCodec video_codec;
     LONG video_bitrate;
+    VTScale scale;
     BOOL two_pass;
     VTAudioCodec audio_codec;
     LONG audio_bitrate;
@@ -59,6 +70,14 @@ LONG VT_ProfileAudioBitrateMax(VTAudioCodec codec);
 BOOL VT_ProfileAudioBitrateOK(VTAudioCodec codec, LONG bitrate);
 BOOL VT_ProfileValidate(const VTProfile *profile);
 BOOL VT_ProfileSlowOnG4(const VTProfile *profile);
+const char *VT_ProfileScaleToken(VTScale scale);
+const char *VT_ProfileScaleLabel(VTScale scale);
+BOOL VT_ProfileScaleFromToken(const char *token, VTScale *out);
+
+/* Even output size. A scaled frame is square pixels, so the source
+   sample aspect is included in the width. Original keeps the source size. */
+BOOL VT_ProfileFrameSize(const VTProfile *profile, int src_w, int src_h,
+                         int sar_num, int sar_den, int *out_w, int *out_h);
 
 void VT_ProfileStoreInit(VTProfileStore *store);
 void VT_ProfileStoreFree(VTProfileStore *store);

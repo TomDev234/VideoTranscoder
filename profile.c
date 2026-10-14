@@ -23,6 +23,7 @@ void VT_ProfileSetDefaults(VTProfile *profile)
     profile->container = VT_CONTAINER_MKV;
     profile->video_codec = VT_VCODEC_MPEG4;
     profile->video_bitrate = VT_DEFAULT_VIDEO_BITRATE;
+    profile->scale = VT_SCALE_ORIGINAL;
     profile->two_pass = FALSE;
     profile->audio_codec = VT_ACODEC_MP3;
     profile->audio_bitrate = VT_DEFAULT_AUDIO_BITRATE;
@@ -106,6 +107,8 @@ BOOL VT_ProfileValidate(const VTProfile *profile)
         return FALSE;
     if (profile->video_codec == VT_VCODEC_COPY && profile->two_pass)
         return FALSE;
+    if ((ULONG)profile->scale >= VT_SCALE_COUNT)
+        return FALSE;
     if (!VT_ProfileVideoBitrateOK(profile->video_codec, profile->video_bitrate))
         return FALSE;
     if (!VT_ProfileAudioBitrateOK(profile->audio_codec, profile->audio_bitrate))
@@ -121,9 +124,111 @@ BOOL VT_ProfileSlowOnG4(const VTProfile *profile)
         return FALSE;
     if (profile->video_codec == VT_VCODEC_H264)
         return TRUE;
+    if (profile->scale == VT_SCALE_1080 && profile->video_codec != VT_VCODEC_COPY)
+        return TRUE;
     if (profile->two_pass && profile->video_codec != VT_VCODEC_COPY)
         return TRUE;
     return FALSE;
+}
+
+const char *VT_ProfileScaleToken(VTScale scale)
+{
+    switch (scale) {
+    case VT_SCALE_ORIGINAL:
+        return "original";
+    case VT_SCALE_576:
+        return "576";
+    case VT_SCALE_720:
+        return "720";
+    case VT_SCALE_1080:
+        return "1080";
+    default:
+        return NULL;
+    }
+}
+
+const char *VT_ProfileScaleLabel(VTScale scale)
+{
+    switch (scale) {
+    case VT_SCALE_ORIGINAL:
+        return "Original";
+    case VT_SCALE_576:
+        return "576p";
+    case VT_SCALE_720:
+        return "720p";
+    case VT_SCALE_1080:
+        return "1080p";
+    default:
+        return NULL;
+    }
+}
+
+BOOL VT_ProfileScaleFromToken(const char *token, VTScale *out)
+{
+    ULONG scale;
+
+    if (!token || !out)
+        return FALSE;
+    for (scale = 0; scale < VT_SCALE_COUNT; scale++) {
+        if (VT_StrEq(token, VT_ProfileScaleToken((VTScale)scale))) {
+            *out = (VTScale)scale;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static int scale_height(VTScale scale)
+{
+    switch (scale) {
+    case VT_SCALE_576:
+        return 576;
+    case VT_SCALE_720:
+        return 720;
+    case VT_SCALE_1080:
+        return 1080;
+    default:
+        return 0;
+    }
+}
+
+BOOL VT_ProfileFrameSize(const VTProfile *profile, int src_w, int src_h,
+                         int sar_num, int sar_den, int *out_w, int *out_h)
+{
+    int target_h;
+    long long wide;
+    long long den;
+    long long num;
+
+    if (!profile || !out_w || !out_h)
+        return FALSE;
+    src_w &= ~1;
+    src_h &= ~1;
+    if (src_w < 2 || src_h < 2)
+        return FALSE;
+    target_h = scale_height(profile->scale);
+    if (profile->video_codec == VT_VCODEC_COPY || target_h <= 0) {
+        *out_w = src_w;
+        *out_h = src_h;
+        return TRUE;
+    }
+    if (sar_num <= 0 || sar_den <= 0) {
+        sar_num = 1;
+        sar_den = 1;
+    }
+    den = (long long)src_h * (long long)sar_den;
+    num = (long long)target_h * (long long)src_w * (long long)sar_num;
+    if (den <= 0)
+        return FALSE;
+    wide = (num + den / 2) / den;
+    if (wide < 2)
+        wide = 2;
+    wide = (wide + 1) & ~1LL;
+    if (wide > 8192 || target_h > 8192)
+        return FALSE;
+    *out_w = (int)wide;
+    *out_h = target_h;
+    return TRUE;
 }
 
 void VT_ProfileStoreInit(VTProfileStore *store)
@@ -197,12 +302,14 @@ static BOOL format_profile(const VTProfile *profile, char *text, ULONG text_len)
     const char *container;
     const char *video;
     const char *audio;
+    const char *scale;
     int wrote;
 
     container = VT_ContainerToken(profile->container);
     video = VT_VideoCodecToken(profile->video_codec);
     audio = VT_AudioCodecToken(profile->audio_codec);
-    if (!container || !video || !audio)
+    scale = VT_ProfileScaleToken(profile->scale);
+    if (!container || !video || !audio || !scale)
         return FALSE;
     wrote = snprintf(text, text_len,
                      "%s %ld\n"
@@ -210,6 +317,7 @@ static BOOL format_profile(const VTProfile *profile, char *text, ULONG text_len)
                      "container=%s\n"
                      "video=%s\n"
                      "video_bitrate=%ld\n"
+                     "scale=%s\n"
                      "two_pass=%ld\n"
                      "audio=%s\n"
                      "audio_bitrate=%ld\n"
@@ -220,6 +328,7 @@ static BOOL format_profile(const VTProfile *profile, char *text, ULONG text_len)
                      container,
                      video,
                      (long)profile->video_bitrate,
+                     scale,
                      profile->two_pass ? 1L : 0L,
                      audio,
                      (long)profile->audio_bitrate,
@@ -467,6 +576,8 @@ static BOOL apply_profile_line(const char *line, APTR user)
         return VT_VideoCodecFromToken(value, &state->profile->video_codec);
     if (VT_StrEq(key, "audio"))
         return VT_AudioCodecFromToken(value, &state->profile->audio_codec);
+    if (VT_StrEq(key, "scale"))
+        return VT_ProfileScaleFromToken(value, &state->profile->scale);
     if (VT_StrEq(key, "video_bitrate") || VT_StrEq(key, "audio_bitrate") ||
         VT_StrEq(key, "gain_db") || VT_StrEq(key, "two_pass")) {
         if (!VT_ParseLong(value, &number))
