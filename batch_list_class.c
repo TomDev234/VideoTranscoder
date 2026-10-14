@@ -8,6 +8,7 @@
 #include <clib/alib_protos.h>
 
 #include <stdio.h>
+#include <string.h>
 
 #include "macros.h"
 #include "vt_ui.h"
@@ -107,6 +108,17 @@ static void prepare_hooks(void)
     hooks_ready = TRUE;
 }
 
+static ULONG batch_context(struct IClass *cl, Object *obj, struct MUIP_ContextMenuBuild *msg)
+{
+    struct MUI_List_TestPos_Result pos;
+
+    memset(&pos, 0, sizeof pos);
+    DoMethod(obj, MUIM_List_TestPos, msg->mx, msg->my, (IPTR)&pos);
+    if (pos.entry >= 0)
+        set(obj, MUIA_List_Active, pos.entry);
+    return DoSuperMethodA(cl, obj, (Msg)msg);
+}
+
 static ULONG batch_get_active(Object *obj)
 {
     LONG active;
@@ -171,6 +183,8 @@ DISPATCHER(BatchList)
         return batch_sync(data, obj);
     case MUIM_VT_BatchGetActive:
         return batch_get_active(obj);
+    case MUIM_ContextMenuBuild:
+        return batch_context(cl, obj, (struct MUIP_ContextMenuBuild *)msg);
     }
     return DoSuperMethodA(cl, obj, msg);
 }

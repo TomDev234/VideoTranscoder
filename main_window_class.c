@@ -5,6 +5,7 @@
  */
 #include <emul/emulregs.h>
 #include <dos/dos.h>
+#include <intuition/intuition.h>
 #include <workbench/workbench.h>
 #include <libraries/asl.h>
 #include <proto/dos.h>
@@ -36,6 +37,10 @@ struct MainData {
     Object *profile_cycle;
     Object *gauge;
     Object *status;
+    Object *menu_remove;
+    Object *menu_log;
+    Object *popup_remove;
+    Object *popup_log;
     const char *cycle_entries[VT_PROFILE_MAX + 1];
     char status_buf[160];
     char add_drawer[VT_PATH_LEN];
@@ -44,6 +49,8 @@ struct MainData {
 };
 
 static const char *cycle_placeholder[] = { "", NULL };
+
+static void update_job_menus(struct MainData *data);
 
 static void set_status(struct MainData *data, const char *text)
 {
@@ -76,6 +83,7 @@ static void refresh_jobs(struct MainData *data)
         nnset(data->batch, MUIA_List_Active, active);
     data->quiet = FALSE;
     refresh_progress(data);
+    update_job_menus(data);
 }
 
 static const VTProfile *active_profile(struct MainData *data)
@@ -560,16 +568,229 @@ static ULONG main_job_select(struct MainData *data)
     if (data->quiet)
         return 0;
     index = selected_job_index(data);
-    if (index < 0 || !data->jobs)
+    if (index < 0 || !data->jobs) {
+        update_job_menus(data);
         return 0;
+    }
     job = data->jobs->items[index];
     profile_index = VT_ProfileStoreIndex(data->profiles, job->profile.name);
-    if (profile_index < 0)
+    if (profile_index < 0) {
+        update_job_menus(data);
         return 0;
+    }
     data->quiet = TRUE;
     nnset(data->profile_cycle, MUIA_Cycle_Active, profile_index);
     data->quiet = FALSE;
+    update_job_menus(data);
     return 0;
+}
+
+static void update_job_menus(struct MainData *data)
+{
+    BOOL has_job = (BOOL)(selected_job_index(data) >= 0);
+
+    if (data->menu_remove)
+        set(data->menu_remove, MUIA_Menuitem_Enabled, has_job);
+    if (data->menu_log)
+        set(data->menu_log, MUIA_Menuitem_Enabled, has_job);
+    if (data->popup_remove)
+        set(data->popup_remove, MUIA_Menuitem_Enabled, has_job);
+    if (data->popup_log)
+        set(data->popup_log, MUIA_Menuitem_Enabled, has_job);
+}
+
+static Object *menu_command(const char *title, const char *shortcut, BOOL enabled)
+{
+    if (shortcut && shortcut[0]) {
+        return MenuitemObject,
+            MUIA_Menuitem_Title, (IPTR)title,
+            MUIA_Menuitem_Shortcut, (IPTR)shortcut,
+            MUIA_Menuitem_Enabled, enabled,
+        End;
+    }
+    return MenuitemObject,
+        MUIA_Menuitem_Title, (IPTR)title,
+        MUIA_Menuitem_Enabled, enabled,
+    End;
+}
+
+static Object *menu_bar(void)
+{
+    return (Object *)MUI_MakeObject(MUIO_Menuitem, NM_BARLABEL, 0, 0, 0);
+}
+
+static void dispose_objects(Object **items, ULONG count)
+{
+    ULONG index;
+
+    for (index = 0; index < count; index++) {
+        if (items[index])
+            MUI_DisposeObject(items[index]);
+    }
+}
+
+static void bind_item(Object *item, Object *window, ULONG method)
+{
+    if (item)
+        DoMethod(item, MUIM_Notify, MUIA_Menuitem_Trigger, MUIV_EveryTime, window, 1, method);
+}
+
+struct WindowMenuItems {
+    Object *add;
+    Object *remove;
+    Object *clear;
+    Object *start;
+    Object *stop;
+    Object *about;
+    Object *quit;
+    Object *new_item;
+    Object *edit_item;
+    Object *duplicate_item;
+    Object *delete_item;
+    Object *log;
+};
+
+struct PopupMenuItems {
+    Object *add;
+    Object *remove;
+    Object *clear;
+    Object *log;
+    Object *start;
+    Object *stop;
+};
+
+static Object *build_menustrip(struct WindowMenuItems *items)
+{
+    Object *bar_jobs;
+    Object *bar_run;
+    Object *bar_quit;
+    Object *strip;
+    Object *owned[16];
+    ULONG count = 0;
+
+    memset(items, 0, sizeof *items);
+    items->add = menu_command("Add...", "A", TRUE);
+    items->remove = menu_command("Remove", "R", FALSE);
+    items->clear = menu_command("Clear", "C", TRUE);
+    bar_jobs = menu_bar();
+    items->start = menu_command("Start", "S", TRUE);
+    items->stop = menu_command("Stop", "T", TRUE);
+    bar_run = menu_bar();
+    items->about = menu_command("About", "?", TRUE);
+    bar_quit = menu_bar();
+    items->quit = menu_command("Quit", "Q", TRUE);
+    items->new_item = menu_command("New", "N", TRUE);
+    items->edit_item = menu_command("Edit", "E", TRUE);
+    items->duplicate_item = menu_command("Duplicate", "U", TRUE);
+    items->delete_item = menu_command("Delete", "D", TRUE);
+    items->log = menu_command("Show log", "L", FALSE);
+    owned[count++] = items->add;
+    owned[count++] = items->remove;
+    owned[count++] = items->clear;
+    owned[count++] = bar_jobs;
+    owned[count++] = items->start;
+    owned[count++] = items->stop;
+    owned[count++] = bar_run;
+    owned[count++] = items->about;
+    owned[count++] = bar_quit;
+    owned[count++] = items->quit;
+    owned[count++] = items->new_item;
+    owned[count++] = items->edit_item;
+    owned[count++] = items->duplicate_item;
+    owned[count++] = items->delete_item;
+    owned[count++] = items->log;
+    if (!items->add || !items->remove || !items->clear || !bar_jobs || !items->start ||
+        !items->stop || !bar_run || !items->about || !bar_quit || !items->quit ||
+        !items->new_item || !items->edit_item || !items->duplicate_item ||
+        !items->delete_item || !items->log) {
+        dispose_objects(owned, count);
+        memset(items, 0, sizeof *items);
+        return NULL;
+    }
+    strip = MenustripObject,
+        Child, MenuObject,
+            MUIA_Menu_Title, "Project",
+            Child, items->add,
+            Child, items->remove,
+            Child, items->clear,
+            Child, bar_jobs,
+            Child, items->start,
+            Child, items->stop,
+            Child, bar_run,
+            Child, items->about,
+            Child, bar_quit,
+            Child, items->quit,
+        End,
+        Child, MenuObject,
+            MUIA_Menu_Title, "Profile",
+            Child, items->new_item,
+            Child, items->edit_item,
+            Child, items->duplicate_item,
+            Child, items->delete_item,
+        End,
+        Child, MenuObject,
+            MUIA_Menu_Title, "Job",
+            Child, items->log,
+        End,
+    End;
+    if (!strip) {
+        dispose_objects(owned, count);
+        memset(items, 0, sizeof *items);
+        return NULL;
+    }
+    return strip;
+}
+
+static Object *build_job_popup(struct PopupMenuItems *items)
+{
+    Object *bar_log;
+    Object *bar_run;
+    Object *strip;
+    Object *owned[8];
+    ULONG count = 0;
+
+    memset(items, 0, sizeof *items);
+    items->add = menu_command("Add...", NULL, TRUE);
+    items->remove = menu_command("Remove", NULL, FALSE);
+    items->clear = menu_command("Clear", NULL, TRUE);
+    bar_log = menu_bar();
+    items->log = menu_command("Show log", NULL, FALSE);
+    bar_run = menu_bar();
+    items->start = menu_command("Start", NULL, TRUE);
+    items->stop = menu_command("Stop", NULL, TRUE);
+    owned[count++] = items->add;
+    owned[count++] = items->remove;
+    owned[count++] = items->clear;
+    owned[count++] = bar_log;
+    owned[count++] = items->log;
+    owned[count++] = bar_run;
+    owned[count++] = items->start;
+    owned[count++] = items->stop;
+    if (!items->add || !items->remove || !items->clear || !bar_log || !items->log ||
+        !bar_run || !items->start || !items->stop) {
+        dispose_objects(owned, count);
+        memset(items, 0, sizeof *items);
+        return NULL;
+    }
+    strip = MenustripObject,
+        Child, MenuObject,
+            MUIA_Menu_Title, "Job",
+            Child, items->add,
+            Child, items->remove,
+            Child, items->clear,
+            Child, bar_log,
+            Child, items->log,
+            Child, bar_run,
+            Child, items->start,
+            Child, items->stop,
+        End,
+    End;
+    if (!strip) {
+        dispose_objects(owned, count);
+        memset(items, 0, sizeof *items);
+        return NULL;
+    }
+    return strip;
 }
 
 static ULONG main_cycle(struct MainData *data)
@@ -638,15 +859,28 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     Object *delete_button;
     Object *log_button;
     Object *about_button;
+    Object *menustrip;
+    Object *popup;
+    struct WindowMenuItems window_items;
+    struct PopupMenuItems popup_items;
     struct TagItem extra[8];
     ULONG extra_count = 0;
 
+    memset(&window_items, 0, sizeof window_items);
+    memset(&popup_items, 0, sizeof popup_items);
+    menustrip = build_menustrip(&window_items);
+    popup = build_job_popup(&popup_items);
     prefs = (VTPrefs *)GetTagData(MUIA_VT_Prefs, 0, ops->ops_AttrList);
     batch = NewObject(VT_BatchListClass->mcc_Class, NULL,
                       MUIA_VT_Jobs, GetTagData(MUIA_VT_Jobs, 0, ops->ops_AttrList),
                       TAG_DONE);
-    if (!batch)
+    if (!batch) {
+        if (menustrip)
+            MUI_DisposeObject(menustrip);
+        if (popup)
+            MUI_DisposeObject(popup);
         return NULL;
+    }
 
     drawer_string = StringObject,
         StringFrame,
@@ -676,17 +910,17 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
         MUIA_Text_Contents, "Add files, choose a profile and an output drawer.",
         MUIA_Text_PreParse, "\33l",
     End;
-    add_button = SimpleButton("_Add");
-    remove_button = SimpleButton("_Remove");
-    clear_button = SimpleButton("_Clear");
-    start_button = SimpleButton("_Start");
-    stop_button = SimpleButton("S_top");
-    new_button = SimpleButton("_New");
-    edit_button = SimpleButton("_Edit");
-    duplicate_button = SimpleButton("D_uplicate");
-    delete_button = SimpleButton("De_lete");
-    log_button = SimpleButton("_Log");
-    about_button = SimpleButton("A_bout");
+    add_button = SimpleButton("Add");
+    remove_button = SimpleButton("Remove");
+    clear_button = SimpleButton("Clear");
+    start_button = SimpleButton("Start");
+    stop_button = SimpleButton("Stop");
+    new_button = SimpleButton("New");
+    edit_button = SimpleButton("Edit");
+    duplicate_button = SimpleButton("Duplicate");
+    delete_button = SimpleButton("Delete");
+    log_button = SimpleButton("Log");
+    about_button = SimpleButton("About");
 
     root = VGroup,
         Child, HGroup,
@@ -730,8 +964,14 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     End;
     if (!root) {
         MUI_DisposeObject(batch);
+        if (menustrip)
+            MUI_DisposeObject(menustrip);
+        if (popup)
+            MUI_DisposeObject(popup);
         return NULL;
     }
+    if (popup)
+        set(batch, MUIA_ContextMenu, popup);
 
     extra[extra_count].ti_Tag = MUIA_Window_Title;
     extra[extra_count++].ti_Data = (IPTR)"VideoTranscoder";
@@ -743,10 +983,16 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     extra[extra_count++].ti_Data = 480;
     extra[extra_count].ti_Tag = MUIA_Window_AppWindow;
     extra[extra_count++].ti_Data = TRUE;
+    if (menustrip) {
+        extra[extra_count].ti_Tag = MUIA_Window_Menustrip;
+        extra[extra_count++].ti_Data = (IPTR)menustrip;
+    }
 
     obj = VT_SuperNew(cl, obj, ops->ops_AttrList, extra, extra_count);
     if (!obj) {
         MUI_DisposeObject(root);
+        if (menustrip)
+            MUI_DisposeObject(menustrip);
         return NULL;
     }
 
@@ -762,6 +1008,10 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     data->profile_cycle = profile_cycle;
     data->gauge = gauge;
     data->status = status;
+    data->menu_remove = window_items.remove;
+    data->menu_log = window_items.log;
+    data->popup_remove = popup_items.remove;
+    data->popup_log = popup_items.log;
     data->quiet = FALSE;
     data->add_drawer[0] = '\0';
     data->shown_job = 0;
@@ -795,6 +1045,25 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     DoMethod(obj, MUIM_Notify, MUIA_Window_CloseRequest, TRUE, obj, 1, MUIM_VT_Close);
     DoMethod(obj, MUIM_Notify, MUIA_AppMessage, MUIV_EveryTime,
              obj, 2, MUIM_VT_Drop, MUIV_TriggerValue);
+    bind_item(window_items.add, obj, MUIM_VT_AddFiles);
+    bind_item(window_items.remove, obj, MUIM_VT_RemoveJob);
+    bind_item(window_items.clear, obj, MUIM_VT_ClearJobs);
+    bind_item(window_items.start, obj, MUIM_VT_Start);
+    bind_item(window_items.stop, obj, MUIM_VT_Stop);
+    bind_item(window_items.about, obj, MUIM_VT_ShowAbout);
+    bind_item(window_items.quit, obj, MUIM_VT_Close);
+    bind_item(window_items.new_item, obj, MUIM_VT_NewProfile);
+    bind_item(window_items.edit_item, obj, MUIM_VT_EditProfile);
+    bind_item(window_items.duplicate_item, obj, MUIM_VT_DuplicateProfile);
+    bind_item(window_items.delete_item, obj, MUIM_VT_DeleteProfile);
+    bind_item(window_items.log, obj, MUIM_VT_ShowLog);
+    bind_item(popup_items.add, obj, MUIM_VT_AddFiles);
+    bind_item(popup_items.remove, obj, MUIM_VT_RemoveJob);
+    bind_item(popup_items.clear, obj, MUIM_VT_ClearJobs);
+    bind_item(popup_items.log, obj, MUIM_VT_ShowLog);
+    bind_item(popup_items.start, obj, MUIM_VT_Start);
+    bind_item(popup_items.stop, obj, MUIM_VT_Stop);
+    update_job_menus(data);
     return obj;
 }
 
