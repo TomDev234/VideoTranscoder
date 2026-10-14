@@ -163,6 +163,20 @@ LONG VT_JobListFindStatus(const VTJobList *list, VTJobStatus status)
     return -1;
 }
 
+BOOL VT_JobSetProfile(VTJob *job, const VTProfile *profile)
+{
+    VTProfile snapshot;
+
+    if (!job || !profile || job->status != VT_JOB_WAITING)
+        return FALSE;
+    snapshot = *profile;
+    VT_ProfileNormalize(&snapshot);
+    if (!VT_ProfileValidate(&snapshot))
+        return FALSE;
+    job->profile = snapshot;
+    return TRUE;
+}
+
 const char *VT_JobStatusLabel(VTJobStatus status)
 {
     switch (status) {

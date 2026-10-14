@@ -68,7 +68,13 @@ static void refresh_progress(struct MainData *data)
 
 static void refresh_jobs(struct MainData *data)
 {
+    LONG active = (LONG)xget(data->batch, MUIA_List_Active);
+
+    data->quiet = TRUE;
     DoMethod(data->batch, MUIM_VT_BatchSync);
+    if (active >= 0)
+        nnset(data->batch, MUIA_List_Active, active);
+    data->quiet = FALSE;
     refresh_progress(data);
 }
 
@@ -545,9 +551,32 @@ static ULONG main_profiles_changed(struct MainData *data, struct MUIP_VT_Profile
     return 0;
 }
 
+static ULONG main_job_select(struct MainData *data)
+{
+    LONG index;
+    LONG profile_index;
+    const VTJob *job;
+
+    if (data->quiet)
+        return 0;
+    index = selected_job_index(data);
+    if (index < 0 || !data->jobs)
+        return 0;
+    job = data->jobs->items[index];
+    profile_index = VT_ProfileStoreIndex(data->profiles, job->profile.name);
+    if (profile_index < 0)
+        return 0;
+    data->quiet = TRUE;
+    nnset(data->profile_cycle, MUIA_Cycle_Active, profile_index);
+    data->quiet = FALSE;
+    return 0;
+}
+
 static ULONG main_cycle(struct MainData *data)
 {
     const VTProfile *profile;
+    LONG index;
+    VTJob *job;
 
     if (data->quiet)
         return 0;
@@ -556,6 +585,34 @@ static ULONG main_cycle(struct MainData *data)
         VT_StrCopy(data->prefs->active_profile, sizeof data->prefs->active_profile, profile->name);
         VT_PrefsSave(data->prefs);
     }
+    index = selected_job_index(data);
+    if (index < 0 || !profile || !data->jobs)
+        return 0;
+    job = data->jobs->items[index];
+    if (job->status != VT_JOB_WAITING || VT_Encode_IsRunning()) {
+        LONG profile_index = VT_ProfileStoreIndex(data->profiles, job->profile.name);
+
+        if (profile_index >= 0) {
+            data->quiet = TRUE;
+            nnset(data->profile_cycle, MUIA_Cycle_Active, profile_index);
+            data->quiet = FALSE;
+            profile = VT_ProfileStoreAt(data->profiles, (ULONG)profile_index);
+            if (data->prefs && profile)
+                VT_StrCopy(data->prefs->active_profile, sizeof data->prefs->active_profile,
+                           profile->name);
+        }
+        if (VT_Encode_IsRunning())
+            set_status(data, "Stop the queue before changing a profile.");
+        else
+            set_status(data, "Only a waiting job can change profile.");
+        return 0;
+    }
+    if (!VT_JobSetProfile(job, profile)) {
+        set_status(data, "That profile cannot be used for this job.");
+        return 0;
+    }
+    refresh_jobs(data);
+    set_status(data, "Profile updated.");
     return 0;
 }
 
@@ -731,6 +788,8 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     DoMethod(about_button, MUIM_Notify, MUIA_Pressed, FALSE, obj, 1, MUIM_VT_ShowAbout);
     DoMethod(profile_cycle, MUIM_Notify, MUIA_Cycle_Active, MUIV_EveryTime,
              obj, 1, MUIM_VT_ProfileCycle);
+    DoMethod(batch, MUIM_Notify, MUIA_List_Active, MUIV_EveryTime,
+             obj, 1, MUIM_VT_JobSelect);
     DoMethod(drawer_string, MUIM_Notify, MUIA_String_Contents, MUIV_EveryTime,
              obj, 1, MUIM_VT_DrawerChanged);
     DoMethod(obj, MUIM_Notify, MUIA_Window_CloseRequest, TRUE, obj, 1, MUIM_VT_Close);
@@ -796,6 +855,8 @@ DISPATCHER(MainWindow)
                        drawer ? drawer : "");
         return 0;
     }
+    case MUIM_VT_JobSelect:
+        return main_job_select(data);
     case MUIM_VT_ProfileCycle:
         return main_cycle(data);
     case MUIM_VT_ProfilesChanged:

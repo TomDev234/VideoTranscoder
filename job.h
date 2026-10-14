@@ -59,6 +59,8 @@ VTJob *VT_JobListFind(VTJobList *list, ULONG id);
 LONG VT_JobListFindStatus(const VTJobList *list, VTJobStatus status);
 
 const char *VT_JobStatusLabel(VTJobStatus status);
+/* Waiting jobs only. Copies a normalized snapshot. */
+BOOL VT_JobSetProfile(VTJob *job, const VTProfile *profile);
 void VT_JobSetStatus(VTJob *job, VTJobStatus status);
 void VT_JobSetProgress(VTJob *job, LONG progress);
 void VT_JobSetError(VTJob *job, const char *message);
