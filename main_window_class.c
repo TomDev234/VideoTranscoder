@@ -41,6 +41,7 @@ struct MainData {
     Object *menu_log;
     Object *popup_remove;
     Object *popup_log;
+    Object *popup_resume;
     const char *cycle_entries[VT_PROFILE_MAX + 1];
     char status_buf[160];
     char add_drawer[VT_PATH_LEN];
@@ -409,6 +410,28 @@ static LONG selected_job_index(struct MainData *data)
     return -1;
 }
 
+static ULONG main_resume(struct MainData *data)
+{
+    LONG index = selected_job_index(data);
+    VTJob *job;
+
+    if (index < 0 || !data->jobs) {
+        set_status(data, "Select a job to resume.");
+        return 0;
+    }
+    job = data->jobs->items[index];
+    if (job->status != VT_JOB_CANCELLED) {
+        set_status(data, "Only a cancelled job can be resumed.");
+        return 0;
+    }
+    job->output_path[0] = '\0';
+    VT_JobSetStatus(job, VT_JOB_WAITING);
+    refresh_jobs(data);
+    refresh_log(data);
+    set_status(data, "Job is waiting again.");
+    return 0;
+}
+
 static ULONG main_remove(struct MainData *data)
 {
     LONG index = selected_job_index(data);
@@ -587,8 +610,12 @@ static ULONG main_job_select(struct MainData *data)
 
 static void update_job_menus(struct MainData *data)
 {
-    BOOL has_job = (BOOL)(selected_job_index(data) >= 0);
+    LONG index = selected_job_index(data);
+    BOOL has_job = (BOOL)(index >= 0);
+    BOOL cancelled = FALSE;
 
+    if (has_job && data->jobs && data->jobs->items[index]->status == VT_JOB_CANCELLED)
+        cancelled = TRUE;
     if (data->menu_remove)
         set(data->menu_remove, MUIA_Menuitem_Enabled, has_job);
     if (data->menu_log)
@@ -597,6 +624,8 @@ static void update_job_menus(struct MainData *data)
         set(data->popup_remove, MUIA_Menuitem_Enabled, has_job);
     if (data->popup_log)
         set(data->popup_log, MUIA_Menuitem_Enabled, has_job);
+    if (data->popup_resume)
+        set(data->popup_resume, MUIA_Menuitem_Enabled, cancelled);
 }
 
 static Object *menu_command(const char *title, const char *shortcut, BOOL enabled)
@@ -655,6 +684,7 @@ struct PopupMenuItems {
     Object *remove;
     Object *clear;
     Object *log;
+    Object *resume;
     Object *start;
     Object *stop;
 };
@@ -746,7 +776,7 @@ static Object *build_job_popup(struct PopupMenuItems *items)
     Object *bar_log;
     Object *bar_run;
     Object *strip;
-    Object *owned[8];
+    Object *owned[9];
     ULONG count = 0;
 
     memset(items, 0, sizeof *items);
@@ -755,6 +785,7 @@ static Object *build_job_popup(struct PopupMenuItems *items)
     items->clear = menu_command("Clear", NULL, TRUE);
     bar_log = menu_bar();
     items->log = menu_command("Show log", NULL, FALSE);
+    items->resume = menu_command("Resume", NULL, FALSE);
     bar_run = menu_bar();
     items->start = menu_command("Start", NULL, TRUE);
     items->stop = menu_command("Stop", NULL, TRUE);
@@ -763,11 +794,12 @@ static Object *build_job_popup(struct PopupMenuItems *items)
     owned[count++] = items->clear;
     owned[count++] = bar_log;
     owned[count++] = items->log;
+    owned[count++] = items->resume;
     owned[count++] = bar_run;
     owned[count++] = items->start;
     owned[count++] = items->stop;
     if (!items->add || !items->remove || !items->clear || !bar_log || !items->log ||
-        !bar_run || !items->start || !items->stop) {
+        !items->resume || !bar_run || !items->start || !items->stop) {
         dispose_objects(owned, count);
         memset(items, 0, sizeof *items);
         return NULL;
@@ -780,6 +812,7 @@ static Object *build_job_popup(struct PopupMenuItems *items)
             Child, items->clear,
             Child, bar_log,
             Child, items->log,
+            Child, items->resume,
             Child, bar_run,
             Child, items->start,
             Child, items->stop,
@@ -1009,6 +1042,7 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     data->menu_log = window_items.log;
     data->popup_remove = popup_items.remove;
     data->popup_log = popup_items.log;
+    data->popup_resume = popup_items.resume;
     data->quiet = FALSE;
     data->add_drawer[0] = '\0';
     data->shown_job = 0;
@@ -1057,6 +1091,7 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     bind_item(popup_items.remove, obj, MUIM_VT_RemoveJob);
     bind_item(popup_items.clear, obj, MUIM_VT_ClearJobs);
     bind_item(popup_items.log, obj, MUIM_VT_ShowLog);
+    bind_item(popup_items.resume, obj, MUIM_VT_ResumeJob);
     bind_item(popup_items.start, obj, MUIM_VT_Start);
     bind_item(popup_items.stop, obj, MUIM_VT_Stop);
     update_job_menus(data);
@@ -1082,6 +1117,8 @@ DISPATCHER(MainWindow)
         return main_show_about(data);
     case MUIM_VT_RemoveJob:
         return main_remove(data);
+    case MUIM_VT_ResumeJob:
+        return main_resume(data);
     case MUIM_VT_ClearJobs:
         return main_clear(data);
     case MUIM_VT_Start:
