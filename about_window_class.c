@@ -63,7 +63,7 @@ static Object *about_new(struct IClass *cl, Object *obj, struct opSet *ops)
     }
     data = INST_DATA(cl, obj);
     snprintf(data->text, sizeof data->text,
-             "VideoTranscoder %s\n"
+             "VideoTranscoder %s © Master Tom\n"
              "\n"
              "Convert videos like a pro.\n"
              "Freeware. This program stays offline. It does not phone home and it does not check for updates.\n"
