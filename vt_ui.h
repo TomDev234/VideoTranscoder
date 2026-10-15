@@ -23,7 +23,6 @@
 #define MUIA_VT_ProfileWindow (VT_TAGBASE + 4)
 #define MUIA_VT_MainWindow    (VT_TAGBASE + 5)
 #define MUIA_VT_JobLogWindow  (VT_TAGBASE + 6)
-#define MUIA_VT_AboutWindow   (VT_TAGBASE + 7)
 
 #define VT_VERSION_TEXT "1.1 (16.10.2026)"
 #define VT_APP_VERSION  "$VER: VideoTranscoder " VT_VERSION_TEXT
@@ -88,7 +87,6 @@ extern struct MUI_CustomClass *VT_BatchListClass;
 extern struct MUI_CustomClass *VT_MainWindowClass;
 extern struct MUI_CustomClass *VT_ProfileWindowClass;
 extern struct MUI_CustomClass *VT_JobLogWindowClass;
-extern struct MUI_CustomClass *VT_AboutWindowClass;
 
 BOOL VT_BatchList_Init(void);
 void VT_BatchList_Exit(void);
@@ -98,8 +96,6 @@ BOOL VT_ProfileWindow_Init(void);
 void VT_ProfileWindow_Exit(void);
 BOOL VT_JobLogWindow_Init(void);
 void VT_JobLogWindow_Exit(void);
-BOOL VT_AboutWindow_Init(void);
-void VT_AboutWindow_Exit(void);
 
 static inline Object *VT_SuperNew(struct IClass *cl, Object *obj, const struct TagItem *user,
                                   const struct TagItem *mine, ULONG mine_count)

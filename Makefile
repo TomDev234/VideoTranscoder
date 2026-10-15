@@ -19,7 +19,7 @@ PREFIX = /usr/local
 MODEL_SRCS = vt_util.c compat.c profile.c prefs.c job.c
 ENGINE_SRCS = vt_avio.c probe.c encoder.c encode_task.c
 UI_SRCS = mui_main.c batch_list_class.c main_window_class.c profile_window_class.c \
-    job_log_window_class.c about_window_class.c
+    job_log_window_class.c
 SRCS = $(MODEL_SRCS) $(ENGINE_SRCS) $(UI_SRCS)
 OBJS = $(SRCS:.c=.o)
 EXE = VideoTranscoder

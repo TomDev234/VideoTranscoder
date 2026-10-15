@@ -31,7 +31,6 @@ struct MainData {
     VTPrefs *prefs;
     Object *profile_window;
     Object *job_log;
-    Object *about;
     Object *batch;
     Object *drawer_string;
     Object *profile_cycle;
@@ -49,6 +48,7 @@ struct MainData {
     char job_file[VT_PATH_LEN];
     ULONG shown_job;
     ULONG delete_state;
+    ULONG about_state;
     BOOL quiet;
 };
 
@@ -526,13 +526,45 @@ static ULONG main_show_log(struct MainData *data)
     return 0;
 }
 
-static ULONG main_show_about(struct MainData *data)
+static ULONG main_show_about(struct MainData *data, Object *obj)
 {
-    if (!data->about) {
-        set_status(data, "The about window is not available.");
-        return 0;
+    char text[1024];
+    IPTR args[1];
+    int wrote;
+
+    /*
+     * The menu click is still being handled. Opening the requester
+     * in this call makes it close at once, so it is posted and runs
+     * after that event.
+     */
+    if (data->about_state == 0) {
+        data->about_state = 1;
+        if (_app(obj)) {
+            DoMethod(_app(obj), MUIM_Application_PushMethod, obj, 1, MUIM_VT_ShowAbout);
+            return 0;
+        }
     }
-    set(data->about, MUIA_Window_Open, TRUE);
+    if (data->about_state == 2)
+        return 0;
+    data->about_state = 2;
+
+    wrote = snprintf(text, sizeof text,
+                     "VideoTranscoder %s © Master Tom\n"
+                     "\n"
+                     "Convert videos like a pro.\n"
+                     "Freeware. This program stays offline. It does not phone home and it does not check for updates.\n"
+                     "The VideoTranscoder binary is free software under the GNU General Public License because it is linked with libx264.\n"
+                     "\n"
+                     "Credits for the statically linked libraries:\n"
+                     "FFmpeg\n"
+                     "LAME\n"
+                     "libx264 (GPL)\n",
+                     VT_VERSION_TEXT);
+    if (wrote > 0 && (ULONG)wrote < sizeof text) {
+        args[0] = (IPTR)text;
+        MUI_RequestA(_app(obj), obj, 0, "About VideoTranscoder", "*_OK", "%s", (APTR)args);
+    }
+    data->about_state = 0;
     return 0;
 }
 
@@ -1328,7 +1360,6 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     data->prefs = prefs;
     data->profile_window = (Object *)GetTagData(MUIA_VT_ProfileWindow, 0, ops->ops_AttrList);
     data->job_log = (Object *)GetTagData(MUIA_VT_JobLogWindow, 0, ops->ops_AttrList);
-    data->about = (Object *)GetTagData(MUIA_VT_AboutWindow, 0, ops->ops_AttrList);
     data->batch = batch;
     data->drawer_string = drawer_string;
     data->profile_cycle = profile_cycle;
@@ -1345,6 +1376,7 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     VT_StrCopy(data->job_file, sizeof data->job_file, "Jobs.jobs");
     data->shown_job = 0;
     data->delete_state = 0;
+    data->about_state = 0;
     VT_StrCopyTrunc(data->status_buf, sizeof data->status_buf,
                     "Add files, choose a profile and an output drawer.");
     if (prefs && prefs->window_valid && prefs->window_width > 80 && prefs->window_height > 60) {
@@ -1418,7 +1450,7 @@ DISPATCHER(MainWindow)
     case MUIM_VT_ShowLog:
         return main_show_log(data);
     case MUIM_VT_ShowAbout:
-        return main_show_about(data);
+        return main_show_about(data, obj);
     case MUIM_VT_RemoveJob:
         return main_remove(data);
     case MUIM_VT_ResumeJob:
