@@ -6,6 +6,7 @@
 #include <dos/dos.h>
 #include <proto/dos.h>
 #include <proto/exec.h>
+#include <proto/icon.h>
 #include <clib/alib_protos.h>
 
 #include "macros.h"
@@ -25,6 +26,7 @@ int main(void)
     Object *profile_win = NULL;
     Object *job_log = NULL;
     Object *about = NULL;
+    struct DiskObject *icon = NULL;
     ULONG signals = 0;
     ULONG encode_sig = 0;
     BOOL encoder = FALSE;
@@ -64,12 +66,14 @@ int main(void)
     }
     set(profile_win, MUIA_VT_MainWindow, (ULONG)main_win);
 
+    icon = GetDiskObject("PROGDIR:VideoTranscoder");
     app = ApplicationObject,
         MUIA_Application_Title, "VideoTranscoder",
         MUIA_Application_Version, VT_APP_VERSION,
         MUIA_Application_Description, "Batch video transcoder",
         MUIA_Application_Base, "VIDEOTRANSCODER",
         MUIA_Application_SingleTask, TRUE,
+        MUIA_Application_DiskObject, icon,
         MUIA_Application_Window, main_win,
         SubWindow, profile_win,
         SubWindow, job_log,
@@ -126,6 +130,8 @@ cleanup:
         if (about)
             MUI_DisposeObject(about);
     }
+    if (icon)
+        FreeDiskObject(icon);
     VT_JobListFree(&jobs);
     VT_ProfileStoreFree(&profiles);
     VT_MainWindow_Exit();
