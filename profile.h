@@ -98,6 +98,8 @@ LONG VT_ProfileStoreCreate(VTProfileStore *store, const char *name);
 LONG VT_ProfileStoreDuplicate(VTProfileStore *store, ULONG index);
 BOOL VT_ProfileStoreRename(VTProfileStore *store, ULONG index, const char *name);
 BOOL VT_ProfileStoreSave(VTProfileStore *store, ULONG index, const VTProfile *profile);
-BOOL VT_ProfileStoreDelete(VTProfileStore *store, ULONG index);
+/* Drops the profile from the store. *file_gone may be NULL.
+   *file_gone is TRUE when the profile file is no longer on disk. */
+BOOL VT_ProfileStoreDelete(VTProfileStore *store, ULONG index, BOOL *file_gone);
 
 #endif

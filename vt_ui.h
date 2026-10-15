@@ -25,7 +25,7 @@
 #define MUIA_VT_JobLogWindow  (VT_TAGBASE + 6)
 #define MUIA_VT_AboutWindow   (VT_TAGBASE + 7)
 
-#define VT_VERSION_TEXT "1.0 (15.10.2026)"
+#define VT_VERSION_TEXT "1.1 (16.10.2026)"
 #define VT_APP_VERSION  "$VER: VideoTranscoder " VT_VERSION_TEXT
 
 #define MUIM_VT_BatchSync        (VT_TAGBASE + 20)

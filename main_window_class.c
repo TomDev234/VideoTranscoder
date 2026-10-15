@@ -48,6 +48,7 @@ struct MainData {
     char job_drawer[VT_PATH_LEN];
     char job_file[VT_PATH_LEN];
     ULONG shown_job;
+    ULONG delete_state;
     BOOL quiet;
 };
 
@@ -695,39 +696,86 @@ static ULONG main_delete_profile(struct MainData *data, Object *obj)
     char deleted[VT_NAME_LEN];
     IPTR args[1];
     LONG choice;
+    BOOL file_gone = FALSE;
+    BOOL only_profile;
     ULONG switched;
 
+    /*
+     * The mouse release that chose Delete is still being handled.
+     * Opening the requester in this call makes it close at once, so
+     * the delete is posted and runs after that event.
+     */
+    if (data->delete_state == 0) {
+        data->delete_state = 1;
+        if (_app(obj)) {
+            DoMethod(_app(obj), MUIM_Application_PushMethod, obj, 1, MUIM_VT_DeleteProfile);
+            return 0;
+        }
+    }
+    if (data->delete_state == 2)
+        return 0;
+    data->delete_state = 2;
+
     active = (LONG)xget(data->profile_cycle, MUIA_Cycle_Active);
-    profile = (active >= 0) ? VT_ProfileStoreAt(data->profiles, (ULONG)active) : NULL;
+    profile = (active >= 0 && data->profiles) ? VT_ProfileStoreAt(data->profiles, (ULONG)active) : NULL;
     if (!profile || !data->profiles) {
+        data->delete_state = 0;
         set_status(data, "Choose a profile.");
         return 0;
     }
-    if (data->profiles->count < 2) {
-        set_status(data, "The last profile cannot be deleted.");
-        return 0;
-    }
+    only_profile = (BOOL)(data->profiles->count < 2);
     if (!VT_StrCopy(deleted, sizeof deleted, profile->name)) {
+        data->delete_state = 0;
         set_status(data, "Could not delete the profile.");
         return 0;
     }
     args[0] = (IPTR)deleted;
     choice = MUI_RequestA(_app(obj), obj, 0, "Delete profile", "Cancel|Delete",
                           "Delete profile \"%s\"?", (APTR)args);
-    if (choice != 2)
+    if (choice != 2) {
+        data->delete_state = 0;
+        if (choice == 0)
+            set_status(data, "Could not confirm the delete.");
         return 0;
-    if (!VT_ProfileStoreDelete(data->profiles, (ULONG)active)) {
+    }
+    if (!VT_ProfileStoreDelete(data->profiles, (ULONG)active, &file_gone)) {
+        data->delete_state = 0;
         set_status(data, "Could not delete the profile.");
         return 0;
     }
-    fallback = ensure_default_profile(data);
+    fallback = NULL;
+    if (data->profiles) {
+        LONG fallback_index = VT_ProfileStoreIndex(data->profiles, VT_DEFAULT_PROFILE_NAME);
+        BOOL need_default = (BOOL)(data->profiles->count == 0);
+        ULONG job_index;
+
+        if (!need_default && data->jobs) {
+            for (job_index = 0; job_index < data->jobs->count; job_index++) {
+                VTJob *job = data->jobs->items[job_index];
+
+                if (job && VT_StrEqI(job->profile.name, deleted)) {
+                    need_default = TRUE;
+                    break;
+                }
+            }
+        }
+        if (fallback_index >= 0)
+            fallback = VT_ProfileStoreAt(data->profiles, (ULONG)fallback_index);
+        else if (need_default)
+            fallback = ensure_default_profile(data);
+    }
     switched = fallback ? replace_jobs_profile(data, deleted, fallback) : 0;
-    rebuild_cycle(data, NULL);
+    rebuild_cycle(data, fallback ? fallback->name : NULL);
     refresh_jobs(data);
     refresh_log(data);
     main_job_select(data);
     VT_PrefsSave(data->prefs);
-    if (switched > 0)
+    data->delete_state = 0;
+    if (only_profile && VT_StrEqI(deleted, VT_DEFAULT_PROFILE_NAME))
+        set_status(data, "Default stays. The list needs a profile.");
+    else if (!file_gone)
+        set_status(data, "Profile removed. The profile file could not be deleted.");
+    else if (switched > 0)
         set_status(data, "Profile deleted. Those jobs now use Default.");
     else
         set_status(data, "Profile deleted.");
@@ -1251,6 +1299,7 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
     data->job_drawer[0] = '\0';
     VT_StrCopy(data->job_file, sizeof data->job_file, "Jobs.jobs");
     data->shown_job = 0;
+    data->delete_state = 0;
     VT_StrCopyTrunc(data->status_buf, sizeof data->status_buf,
                     "Add files, choose a profile and an output drawer.");
     if (prefs && prefs->window_valid && prefs->window_width > 80 && prefs->window_height > 60) {

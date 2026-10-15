@@ -584,23 +584,28 @@ static BOOL delete_profile_file(const char *path)
     return VT_DeleteIfExists(path);
 }
 
-BOOL VT_ProfileStoreDelete(VTProfileStore *store, ULONG index)
+BOOL VT_ProfileStoreDelete(VTProfileStore *store, ULONG index, BOOL *file_gone)
 {
     char path[VT_PATH_LEN];
     char canonical[VT_PATH_LEN];
     ULONG cursor;
     const VTProfile *profile;
+    BOOL gone;
 
+    if (file_gone)
+        *file_gone = FALSE;
     if (!store || index >= store->count)
         return FALSE;
     profile = &store->items[index]->profile;
-    if (!VT_StrCopy(path, sizeof path, store->items[index]->path))
-        return FALSE;
+    path[0] = '\0';
+    VT_StrCopy(path, sizeof path, store->items[index]->path);
     canonical[0] = '\0';
     profile_path(profile, canonical, sizeof canonical);
-    if (!delete_profile_file(path) &&
-        (canonical[0] == '\0' || VT_StrEqI(path, canonical) || !delete_profile_file(canonical)))
-        return FALSE;
+    gone = delete_profile_file(path);
+    if (!gone && canonical[0] && !VT_StrEqI(path, canonical))
+        gone = delete_profile_file(canonical);
+    if (file_gone)
+        *file_gone = (BOOL)(gone || (path[0] && !VT_FileExists(path)));
 
     FreeVec(store->items[index]);
     for (cursor = index; cursor + 1 < store->count; cursor++)

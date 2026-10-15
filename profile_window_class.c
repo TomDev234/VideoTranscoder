@@ -352,7 +352,7 @@ static ULONG profile_save(struct ProfileData *data, Object *obj)
             return 0;
         }
         if (!VT_ProfileStoreSave(data->profiles, (ULONG)created, &edited)) {
-            VT_ProfileStoreDelete(data->profiles, (ULONG)created);
+            VT_ProfileStoreDelete(data->profiles, (ULONG)created, NULL);
             show_error(data, "Could not save the profile.");
             return 0;
         }
