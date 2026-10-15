@@ -415,9 +415,9 @@ static ULONG main_open_jobs(struct MainData *data, Object *obj)
     if (!ask_job_file(data, obj, FALSE, path, sizeof path))
         return 0;
     if (data->jobs->count > 0) {
-        choice = MUI_RequestA(_app(obj), obj, 0, "Open job list", "Cancel|Replace",
+        choice = MUI_RequestA(_app(obj), obj, 0, "Open job list", "*_Replace|Cancel",
                               "Replace the current job list?", NULL);
-        if (choice != 2)
+        if (choice != 1)
             return 0;
     }
     if (!VT_JobListLoad(data->jobs, path)) {
@@ -456,9 +456,9 @@ static ULONG main_save_jobs(struct MainData *data, Object *obj)
     if (!ask_job_file(data, obj, TRUE, path, sizeof path))
         return 0;
     if (VT_FileExists(path)) {
-        choice = MUI_RequestA(_app(obj), obj, 0, "Save job list", "Cancel|Replace",
+        choice = MUI_RequestA(_app(obj), obj, 0, "Save job list", "*_Replace|Cancel",
                               "Replace the existing file?", NULL);
-        if (choice != 2)
+        if (choice != 1)
             return 0;
     }
     if (!VT_JobListSave(data->jobs, path)) {
@@ -730,12 +730,15 @@ static ULONG main_delete_profile(struct MainData *data, Object *obj)
         return 0;
     }
     args[0] = (IPTR)deleted;
-    choice = MUI_RequestA(_app(obj), obj, 0, "Delete profile", "Cancel|Delete",
+    /*
+     * MUI numbers requester buttons 1, 2, ... from the left, and the
+     * rightmost button is 0, the same as closing the window. Delete
+     * is therefore the left button and returns 1.
+     */
+    choice = MUI_RequestA(_app(obj), obj, 0, "Delete profile", "*_Delete|Cancel",
                           "Delete profile \"%s\"?", (APTR)args);
-    if (choice != 2) {
+    if (choice != 1) {
         data->delete_state = 0;
-        if (choice == 0)
-            set_status(data, "Could not confirm the delete.");
         return 0;
     }
     if (!VT_ProfileStoreDelete(data->profiles, (ULONG)active, &file_gone)) {
