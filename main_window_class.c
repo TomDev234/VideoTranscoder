@@ -549,7 +549,7 @@ static ULONG main_show_about(struct MainData *data, Object *obj)
     data->about_state = 2;
 
     wrote = snprintf(text, sizeof text,
-                     "VideoTranscoder %s © Master Tom\n"
+                     "VideoTranscoder %s by Master Tom\n"
                      "\n"
                      "Convert videos like a pro.\n"
                      "Freeware. This program stays offline. It does not phone home and it does not check for updates.\n"
