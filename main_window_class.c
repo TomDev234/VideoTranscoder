@@ -57,6 +57,7 @@ static const char *cycle_placeholder[] = { "", NULL };
 static void update_job_menus(struct MainData *data);
 static void show_log(struct MainData *data, const VTJob *job, BOOL open_window);
 static ULONG main_job_select(struct MainData *data);
+static ULONG adopt_loaded_profiles(struct MainData *data);
 
 static void set_status(struct MainData *data, const char *text)
 {
@@ -403,6 +404,7 @@ static ULONG main_open_jobs(struct MainData *data, Object *obj)
 {
     char path[VT_PATH_LEN];
     LONG choice;
+    ULONG switched;
 
     if (!data->jobs) {
         set_status(data, "The queue is not available.");
@@ -425,6 +427,7 @@ static ULONG main_open_jobs(struct MainData *data, Object *obj)
         return 0;
     }
     data->shown_job = 0;
+    switched = adopt_loaded_profiles(data);
     refresh_jobs(data);
     data->quiet = TRUE;
     nnset(data->batch, MUIA_List_Active, MUIV_List_Active_Off);
@@ -434,9 +437,16 @@ static ULONG main_open_jobs(struct MainData *data, Object *obj)
         show_log(data, NULL, FALSE);
     if (data->jobs->count == 0)
         set_status(data, "Opened an empty job list.");
+    else if (switched > 0 && data->jobs->count == 1)
+        set_status(data, "Opened 1 job. Its profile is missing, so it uses Default.");
     else if (data->jobs->count == 1)
         set_status(data, "Opened 1 job.");
-    else {
+    else if (switched > 0) {
+        snprintf(data->status_buf, sizeof data->status_buf,
+                 "Opened %lu jobs. Missing profiles now use Default.",
+                 (unsigned long)data->jobs->count);
+        set_status(data, data->status_buf);
+    } else {
         snprintf(data->status_buf, sizeof data->status_buf, "Opened %lu jobs.",
                  (unsigned long)data->jobs->count);
         set_status(data, data->status_buf);
@@ -686,6 +696,38 @@ static const VTProfile *ensure_default_profile(struct MainData *data)
     if (created < 0)
         return NULL;
     return VT_ProfileStoreAt(data->profiles, (ULONG)created);
+}
+
+/* A saved job keeps the profile snapshot from the file. If that name is
+   no longer in the profile list, the job uses Default instead. */
+static ULONG adopt_loaded_profiles(struct MainData *data)
+{
+    const VTProfile *fallback = NULL;
+    BOOL made_default = FALSE;
+    ULONG index;
+    ULONG changed = 0;
+
+    if (!data->jobs || !data->profiles)
+        return 0;
+    for (index = 0; index < data->jobs->count; index++) {
+        VTJob *job = data->jobs->items[index];
+
+        if (!job || VT_ProfileStoreIndex(data->profiles, job->profile.name) >= 0)
+            continue;
+        if (!fallback) {
+            LONG existing = VT_ProfileStoreIndex(data->profiles, VT_DEFAULT_PROFILE_NAME);
+
+            fallback = ensure_default_profile(data);
+            made_default = (BOOL)(existing < 0 && fallback != NULL);
+        }
+        if (fallback && VT_JobReplaceProfile(job, fallback))
+            changed++;
+    }
+    if (made_default) {
+        rebuild_cycle(data, NULL);
+        VT_PrefsSave(data->prefs);
+    }
+    return changed;
 }
 
 static ULONG main_delete_profile(struct MainData *data, Object *obj)
