@@ -61,6 +61,7 @@
 struct MUIP_VT_ProfilesChanged {
     ULONG MethodID;
     const char *name;
+    const char *previous;
 };
 
 struct MUIP_VT_ProfileUse {

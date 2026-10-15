@@ -299,7 +299,10 @@ static ULONG profile_save(struct ProfileData *data, Object *obj)
 {
     VTProfile edited;
     LONG index;
+    char previous[VT_NAME_LEN];
     struct MUIP_VT_ProfilesChanged changed;
+
+    previous[0] = '\0';
 
     if (!data->profiles)
         return 0;
@@ -354,6 +357,10 @@ static ULONG profile_save(struct ProfileData *data, Object *obj)
             return 0;
         }
     } else {
+        const VTProfile *current = VT_ProfileStoreAt(data->profiles, (ULONG)data->edit_index);
+
+        if (current)
+            VT_StrCopy(previous, sizeof previous, current->name);
         if (index >= 0 && index != data->edit_index) {
             show_error(data, "A profile with that name already exists.");
             return 0;
@@ -367,6 +374,7 @@ static ULONG profile_save(struct ProfileData *data, Object *obj)
     if (data->main_window) {
         changed.MethodID = MUIM_VT_ProfilesChanged;
         changed.name = edited.name;
+        changed.previous = previous[0] ? previous : edited.name;
         DoMethodA(data->main_window, (Msg)&changed);
     }
     set(obj, MUIA_Window_Open, FALSE);

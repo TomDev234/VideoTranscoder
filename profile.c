@@ -574,16 +574,32 @@ BOOL VT_ProfileStoreRename(VTProfileStore *store, ULONG index, const char *name)
     return VT_ProfileStoreSave(store, index, &edited);
 }
 
+static BOOL delete_profile_file(const char *path)
+{
+    if (!path || !path[0])
+        return FALSE;
+    if (!VT_FileExists(path))
+        return TRUE;
+    SetProtection((STRPTR)path, 0);
+    return VT_DeleteIfExists(path);
+}
+
 BOOL VT_ProfileStoreDelete(VTProfileStore *store, ULONG index)
 {
     char path[VT_PATH_LEN];
+    char canonical[VT_PATH_LEN];
     ULONG cursor;
+    const VTProfile *profile;
 
     if (!store || index >= store->count)
         return FALSE;
+    profile = &store->items[index]->profile;
     if (!VT_StrCopy(path, sizeof path, store->items[index]->path))
         return FALSE;
-    if (!VT_DeleteIfExists(path))
+    canonical[0] = '\0';
+    profile_path(profile, canonical, sizeof canonical);
+    if (!delete_profile_file(path) &&
+        (canonical[0] == '\0' || VT_StrEqI(path, canonical) || !delete_profile_file(canonical)))
         return FALSE;
 
     FreeVec(store->items[index]);

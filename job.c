@@ -177,6 +177,20 @@ BOOL VT_JobSetProfile(VTJob *job, const VTProfile *profile)
     return TRUE;
 }
 
+BOOL VT_JobReplaceProfile(VTJob *job, const VTProfile *profile)
+{
+    VTProfile snapshot;
+
+    if (!job || !profile)
+        return FALSE;
+    snapshot = *profile;
+    VT_ProfileNormalize(&snapshot);
+    if (!VT_ProfileValidate(&snapshot))
+        return FALSE;
+    job->profile = snapshot;
+    return TRUE;
+}
+
 const char *VT_JobStatusLabel(VTJobStatus status)
 {
     switch (status) {

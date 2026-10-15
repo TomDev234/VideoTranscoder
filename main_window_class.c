@@ -55,6 +55,7 @@ static const char *cycle_placeholder[] = { "", NULL };
 
 static void update_job_menus(struct MainData *data);
 static void show_log(struct MainData *data, const VTJob *job, BOOL open_window);
+static ULONG main_job_select(struct MainData *data);
 
 static void set_status(struct MainData *data, const char *text)
 {
@@ -652,20 +653,65 @@ static ULONG main_profile_use(struct MainData *data, LONG index)
     return 0;
 }
 
+static ULONG replace_jobs_profile(struct MainData *data, const char *name, const VTProfile *profile)
+{
+    ULONG index;
+    ULONG changed = 0;
+
+    if (!data->jobs || !name || !name[0] || !profile)
+        return 0;
+    for (index = 0; index < data->jobs->count; index++) {
+        VTJob *job = data->jobs->items[index];
+
+        if (!job || !VT_StrEqI(job->profile.name, name))
+            continue;
+        if (VT_JobReplaceProfile(job, profile))
+            changed++;
+    }
+    return changed;
+}
+
+static const VTProfile *ensure_default_profile(struct MainData *data)
+{
+    LONG index;
+    LONG created;
+
+    if (!data->profiles)
+        return NULL;
+    index = VT_ProfileStoreIndex(data->profiles, VT_DEFAULT_PROFILE_NAME);
+    if (index >= 0)
+        return VT_ProfileStoreAt(data->profiles, (ULONG)index);
+    created = VT_ProfileStoreCreate(data->profiles, VT_DEFAULT_PROFILE_NAME);
+    if (created < 0)
+        return NULL;
+    return VT_ProfileStoreAt(data->profiles, (ULONG)created);
+}
+
 static ULONG main_delete_profile(struct MainData *data, Object *obj)
 {
     LONG active;
     const VTProfile *profile;
+    const VTProfile *fallback;
+    char deleted[VT_NAME_LEN];
     IPTR args[1];
     LONG choice;
+    ULONG switched;
 
     active = (LONG)xget(data->profile_cycle, MUIA_Cycle_Active);
     profile = (active >= 0) ? VT_ProfileStoreAt(data->profiles, (ULONG)active) : NULL;
-    if (!profile) {
+    if (!profile || !data->profiles) {
         set_status(data, "Choose a profile.");
         return 0;
     }
-    args[0] = (IPTR)profile->name;
+    if (data->profiles->count < 2) {
+        set_status(data, "The last profile cannot be deleted.");
+        return 0;
+    }
+    if (!VT_StrCopy(deleted, sizeof deleted, profile->name)) {
+        set_status(data, "Could not delete the profile.");
+        return 0;
+    }
+    args[0] = (IPTR)deleted;
     choice = MUI_RequestA(_app(obj), obj, 0, "Delete profile", "Cancel|Delete",
                           "Delete profile \"%s\"?", (APTR)args);
     if (choice != 2)
@@ -674,9 +720,17 @@ static ULONG main_delete_profile(struct MainData *data, Object *obj)
         set_status(data, "Could not delete the profile.");
         return 0;
     }
+    fallback = ensure_default_profile(data);
+    switched = fallback ? replace_jobs_profile(data, deleted, fallback) : 0;
     rebuild_cycle(data, NULL);
+    refresh_jobs(data);
+    refresh_log(data);
+    main_job_select(data);
     VT_PrefsSave(data->prefs);
-    set_status(data, "Profile deleted.");
+    if (switched > 0)
+        set_status(data, "Profile deleted. Those jobs now use Default.");
+    else
+        set_status(data, "Profile deleted.");
     return 0;
 }
 
@@ -705,7 +759,17 @@ static ULONG main_duplicate_profile(struct MainData *data)
 
 static ULONG main_profiles_changed(struct MainData *data, struct MUIP_VT_ProfilesChanged *msg)
 {
+    const VTProfile *profile = NULL;
+    LONG index;
+
     rebuild_cycle(data, msg->name);
+    index = VT_ProfileStoreIndex(data->profiles, msg->name);
+    if (index >= 0)
+        profile = VT_ProfileStoreAt(data->profiles, (ULONG)index);
+    if (profile && msg->previous && msg->previous[0])
+        replace_jobs_profile(data, msg->previous, profile);
+    refresh_jobs(data);
+    refresh_log(data);
     VT_PrefsSave(data->prefs);
     set_status(data, "Profile saved.");
     return 0;
