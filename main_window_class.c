@@ -552,8 +552,10 @@ static ULONG main_show_about(struct MainData *data, Object *obj)
                      "VideoTranscoder %s by Master Tom\n"
                      "\n"
                      "Convert videos like a pro.\n"
-                     "Freeware. This program stays offline. It does not phone home and it does not check for updates.\n"
-                     "The VideoTranscoder binary is free software under the GNU General Public License because it is linked with libx264.\n"
+                     "Freeware. This program stays offline.\n"
+                     "It does not phone home and it does not check for updates.\n"
+                     "The VideoTranscoder binary is free software under the\n"
+                     "GNU General Public License, because it is linked with libx264.\n"
                      "\n"
                      "Credits for the statically linked libraries:\n"
                      "FFmpeg\n"
@@ -1333,6 +1335,8 @@ static Object *main_new(struct IClass *cl, Object *obj, struct opSet *ops)
 
     extra[extra_count].ti_Tag = MUIA_Window_Title;
     extra[extra_count++].ti_Data = (IPTR)"VideoTranscoder";
+    extra[extra_count].ti_Tag = MUIA_Window_ID;
+    extra[extra_count++].ti_Data = MAKE_ID('M','A','I','N');
     extra[extra_count].ti_Tag = MUIA_Window_RootObject;
     extra[extra_count++].ti_Data = (IPTR)root;
     extra[extra_count].ti_Tag = MUIA_Window_Width;

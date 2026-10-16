@@ -506,6 +506,8 @@ static Object *profile_new(struct IClass *cl, Object *obj, struct opSet *ops)
 
     extra[extra_count].ti_Tag = MUIA_Window_Title;
     extra[extra_count++].ti_Data = (IPTR)"Profile";
+    extra[extra_count].ti_Tag = MUIA_Window_ID;
+    extra[extra_count++].ti_Data = MAKE_ID('E','D','I','T');
     extra[extra_count].ti_Tag = MUIA_Window_RootObject;
     extra[extra_count++].ti_Data = (IPTR)root;
     extra[extra_count].ti_Tag = MUIA_Window_LeftEdge;

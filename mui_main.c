@@ -67,6 +67,8 @@ int main(void)
     app = ApplicationObject,
         MUIA_Application_Title, "VideoTranscoder",
         MUIA_Application_Version, VT_APP_VERSION,
+        MUIA_Application_Copyright, "© 2026 Master Tom",
+        MUIA_Application_Author, "Master Tom",
         MUIA_Application_Description, "Batch video transcoder",
         MUIA_Application_Base, "VIDEOTRANSCODER",
         MUIA_Application_SingleTask, TRUE,
